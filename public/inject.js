@@ -4,7 +4,7 @@ const visible = [...document.querySelectorAll("[class*='question'], [class*='tes
   .map(el => el.outerHTML)
   .join("<hr>");
 
-const img = document.querySelector("img.question-image") || document.querySelector("img"); // Уточнённый селектор
+const img = document.querySelector("img.question-image") || document.querySelector("img");
 const imageUrl = img?.src || null;
 
 const SERVER = "https://q-nq3n.onrender.com";
