@@ -5,8 +5,11 @@ const uid = scriptSrc.match(/\/(u1|u2|mohir)/)?.[1] || "u1";
 const boxes = {};
 let currentQuestionId = null;
 
+console.log(`[Inject] UID: ${uid}, Script loaded from: ${scriptSrc}`);
+
 // Функция для создания таблички
 function createBox(questionID) {
+  console.log(`[Inject] Creating box for questionID: ${questionID}`);
   const box = document.createElement("div");
   box.dataset.questionId = questionID;
   box.textContent = "Ждём ответ...";
@@ -43,6 +46,7 @@ document.addEventListener("keydown", (e) => {
       box.visible = !box.visible;
       box.element.style.display = box.visible ? "block" : "none";
       localStorage.setItem(`boxVisible_${uid}_${currentQuestionId}`, box.visible);
+      console.log(`[Inject] Toggled visibility for ${currentQuestionId}: ${box.visible}`);
     }
   }
 });
@@ -53,27 +57,43 @@ document.addEventListener("keyup", (e) => {
 
 // Функция для получения номера текущего вопроса
 function getCurrentQuestionNumber() {
-  const questionElement = document.querySelector("[class*='question-number'], [class*='question-id'], [class*='current-question']") || document.querySelector("h1, h2, h3");
-  if (questionElement) {
-    const text = questionElement.textContent.toLowerCase();
-    const match = text.match(/вопрос\s*(\d+)/i) || text.match(/question\s*(\d+)/i) || text.match(/^\d+/);
-    return match ? parseInt(match[1]) : null;
+  const selectors = [
+    "[class*='question-number']",
+    "[class*='question-id']",
+    "[class*='current-question']",
+    "[data-question-number]",
+    "[data-question-id]",
+    "h1, h2, h3, h4",
+    ".question-header",
+    ".question-title",
+    "[class*='question']",
+    "[id*='question']"
+  ];
+  for (const selector of selectors) {
+    const elements = document.querySelectorAll(selector);
+    for (const element of elements) {
+      const text = element.textContent.toLowerCase();
+      const match = text.match(/вопрос\s*(\d+)/i) || text.match(/question\s*(\d+)/i) || text.match(/^\d+/);
+      if (match) {
+        console.log(`[Inject] Found question number: ${match[1]} from selector: ${selector}`);
+        return parseInt(match[1]);
+      }
+    }
   }
+  console.log("[Inject] Could not find question number, using fallback");
   return null;
 }
 
 // Функция для обработки вопроса
 async function handleQuestion() {
-  const questionNumber = getCurrentQuestionNumber();
-  if (!questionNumber || questionNumber < 1 || questionNumber > 25) {
-    return;
-  }
+  let questionNumber = getCurrentQuestionNumber();
+  let questionID = questionNumber ? `q${questionNumber}` : `q${Date.now()}`; // Резервный ID
 
-  const questionID = `q${questionNumber}`;
   if (questionID === currentQuestionId) {
     return;
   }
 
+  console.log(`[Inject] Handling question: ${questionID}`);
   // Скрываем все таблички
   Object.values(boxes).forEach(box => {
     box.element.style.display = "none";
@@ -86,7 +106,7 @@ async function handleQuestion() {
   if (!box) {
     box = createBox(questionID);
     // Собираем содержимое вопроса
-    const visible = [...document.querySelectorAll("[class*='question'], [class*='test'], [class*='pane']")]
+    const visible = [...document.querySelectorAll("[class*='question'], [class*='test'], [class*='pane'], [id*='question']")]
       .filter(el => el.offsetParent !== null)
       .map(el => el.outerHTML)
       .join("<hr>");
@@ -96,8 +116,11 @@ async function handleQuestion() {
     // Отправка вопроса
     try {
       if (!visible) {
-        throw new Error("Не удалось собрать содержимое вопроса");
+        box.textContent = "Ошибка: Не удалось собрать вопрос";
+        console.log(`[Inject] No visible content for question ${questionID}`);
+        return;
       }
+      console.log(`[Inject] Sending question ${questionID} to ${SERVER}/manual-review/${uid}`);
       const response = await fetch(`${SERVER}/manual-review/${uid}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -111,8 +134,10 @@ async function handleQuestion() {
         throw new Error(`Ошибка сервера: ${response.status}`);
       }
       box.textContent = "Вопрос отправлен, ждём ответ...";
+      console.log(`[Inject] Question ${questionID} sent successfully`);
     } catch (error) {
       box.textContent = `Ошибка: ${error.message}`;
+      console.error(`[Inject] Error sending question: ${error.message}`);
     }
 
     // Периодический опрос ответа
@@ -128,11 +153,13 @@ async function handleQuestion() {
           if (boxes[questionID].visible) {
             box.style.display = "block";
           }
+          console.log(`[Inject] Received answer for ${questionID}: ${data.answer}`);
         } else {
           setTimeout(pollAnswer, 2000);
         }
       } catch (error) {
         box.textContent = `Ошибка: ${error.message}`;
+        console.error(`[Inject] Error polling answer: ${error.message}`);
         setTimeout(pollAnswer, 2000);
       }
     }
@@ -144,6 +171,7 @@ async function handleQuestion() {
 
 // Отслеживание изменений на странице
 const observer = new MutationObserver(() => {
+  console.log("[Inject] DOM changed, checking for new question");
   handleQuestion();
 });
 
@@ -153,4 +181,5 @@ observer.observe(document.body, {
 });
 
 // Запускаем обработку текущего вопроса
+console.log("[Inject] Starting initial question handling");
 handleQuestion();
