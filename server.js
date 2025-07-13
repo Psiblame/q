@@ -1,19 +1,19 @@
 const express = require("express");
 const bodyParser = require("body-parser");
 const path = require("path");
-const cors = require("cors");
 const fs = require("fs");
+const cors = require("cors");
 
 const app = express();
 
 const allowedUsers = ["u1", "u2", "mohir"];
-const adminLogin = "admin";
-const adminPassword = "12345";
+const adminLogin = "psiblame";
+const adminPassword = "m0H1r_top";
 
 const questions = {};
 const answers = {};
 
-app.use(cors()); // Разрешаем CORS для клиентских запросов
+app.use(cors()); // Включаем CORS для кросс-доменных запросов
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(express.static("public"));
