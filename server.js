@@ -10,23 +10,24 @@ const allowedUsers = ["u1", "u2", "mohir"];
 const adminLogin = "psiblame";
 const adminPassword = "qwerty123";
 
-const questions = {};
-const answers = {};
+// Хранилище вопросов и ответов по uid
+const questions = { u1: {}, u2: {}, mohir: {} };
+const answers = { u1: {}, u2: {}, mohir: {} };
 
-app.use(cors()); // Включаем CORS для кросс-доменных запросов
+app.use(cors());
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(express.static("public"));
 
 // Корневой маршрут
 app.get("/", (req, res) => {
-  res.send("Сервер работает! Доступные маршруты: /:uid, /admin, /manual-review, /get-answer/:questionID");
+  res.send("Сервер работает! Доступные маршруты: /:uid, /admin, /manual-review/:uid, /get-answer/:uid/:questionID, /clear-questions/:uid");
 });
 
 // Basic-авторизация для /admin
 app.use("/admin", (req, res, next) => {
   const auth = req.headers.authorization;
-  console.log(`Authorization header: ${auth}`); // Логируем заголовок для диагностики
+  console.log(`Authorization header: ${auth}`);
 
   if (!auth) {
     res.set("WWW-Authenticate", 'Basic realm="Admin Panel"');
@@ -42,7 +43,7 @@ app.use("/admin", (req, res, next) => {
 
   const decoded = Buffer.from(encoded, "base64").toString();
   const [login, password] = decoded.split(":");
-  console.log(`Login attempt: ${login}`); // Логируем логин
+  console.log(`Login attempt: ${login}`);
 
   if (login === adminLogin && password === adminPassword) {
     next();
@@ -67,24 +68,40 @@ app.get("/admin", (req, res) => {
           .question { border: 1px solid #ccc; padding: 10px; margin: 10px 0; }
           .question img { max-width: 300px; }
           .question-content { max-height: 150px; overflow: auto; }
+          .user-section { margin-bottom: 20px; }
+          .clear-btn { background: #ff4444; color: white; padding: 5px 10px; border: none; cursor: pointer; }
         </style>
       </head>
       <body>
         <h2>Админ-панель — Вопросы</h2>
     `;
-    for (const [id, q] of Object.entries(questions)) {
-      html += `
-        <div class="question">
-          <strong>ID:</strong> ${id}<br>
-          <form method="POST" action="/answer">
-            <textarea name="id" hidden>${id}</textarea>
-            ${q.imageUrl ? `<img src="${q.imageUrl}" alt="Question image"><br>` : ""}
-            <div class="question-content">${q.html}</div>
-            <input name="answer" placeholder="Введите ответ (напр. A)" required>
-            <button type="submit">Отправить</button>
-          </form>
-        </div>
-      `;
+    for (const uid of allowedUsers) {
+      html += `<h3>Пользователь: ${uid}</h3>`;
+      html += `<form method="POST" action="/clear-questions/${uid}"><button class="clear-btn">Очистить вопросы ${uid}</button></form>`;
+      const userQuestions = questions[uid] || {};
+      const sortedQuestions = Object.entries(userQuestions).sort(([id1], [id2]) => {
+        const num1 = parseInt(id1.replace("q", ""));
+        const num2 = parseInt(id2.replace("q", ""));
+        return num1 - num2;
+      });
+      if (sortedQuestions.length === 0) {
+        html += `<p>Вопросы отсутствуют</p>`;
+      }
+      for (const [id, q] of sortedQuestions) {
+        html += `
+          <div class="question">
+            <strong>Вопрос ${id} (Пользователь: ${uid}):</strong><br>
+            <form method="POST" action="/answer">
+              <input type="hidden" name="uid" value="${uid}">
+              <textarea name="id" hidden>${id}</textarea>
+              ${q.imageUrl ? `<img src="${q.imageUrl}" alt="Question image"><br>` : ""}
+              <div class="question-content">${q.html}</div>
+              <input name="answer" placeholder="Введите ответ (напр. A)" required>
+              <button type="submit">Отправить</button>
+            </form>
+          </div>
+        `;
+      }
     }
     html += `
       </body>
@@ -99,33 +116,50 @@ app.get("/admin", (req, res) => {
 
 // Обработка ответа
 app.post("/answer", (req, res) => {
-  const { id, answer } = req.body;
-  if (!id || !answer) {
-    return res.status(400).json({ error: "Отсутствует id или answer" });
+  const { uid, id, answer } = req.body;
+  if (!uid || !id || !answer || !allowedUsers.includes(uid)) {
+    return res.status(400).json({ error: "Отсутствует uid, id или answer, или неверный uid" });
   }
-  answers[id] = answer.toUpperCase();
+  answers[uid][id] = answer.toUpperCase();
+  console.log(`Answer saved: ${uid}/${id} -> ${answer}`);
   res.redirect("/admin");
 });
 
 // Получение вопроса
-app.post("/manual-review", (req, res) => {
+app.post("/manual-review/:uid", (req, res) => {
+  const { uid } = req.params;
   const { questionID, questionHTML, imageUrl } = req.body;
-  if (!questionID || !questionHTML) {
-    return res.status(400).json({ error: "Отсутствует questionID или questionHTML" });
+  if (!uid || !questionID || !questionHTML || !allowedUsers.includes(uid)) {
+    return res.status(400).json({ error: "Отсутствует uid, questionID или questionHTML, или неверный uid" });
   }
-  questions[questionID] = { html: questionHTML, imageUrl };
-  console.log(`Question received: ${questionID}`); // Логируем получение вопроса
+  questions[uid][questionID] = { html: questionHTML, imageUrl };
+  console.log(`Question received: ${uid}/${questionID}`);
   res.status(200).json({ message: "Вопрос успешно сохранён", questionID });
 });
 
 // Отправка ответа
-app.get("/get-answer/:questionID", (req, res) => {
-  const { questionID } = req.params;
-  const answer = answers[questionID] || null;
+app.get("/get-answer/:uid/:questionID", (req, res) => {
+  const { uid, questionID } = req.params;
+  if (!allowedUsers.includes(uid)) {
+    return res.status(400).json({ error: "Неверный uid" });
+  }
+  const answer = answers[uid][questionID] || null;
   res.json({ answer });
 });
 
-// Доступ к inject.js для разрешённых пользователей (последний маршрут!)
+// Очистка вопросов пользователя
+app.post("/clear-questions/:uid", (req, res) => {
+  const { uid } = req.params;
+  if (!allowedUsers.includes(uid)) {
+    return res.status(400).json({ error: "Неверный uid" });
+  }
+  questions[uid] = {};
+  answers[uid] = {};
+  console.log(`Questions and answers cleared for: ${uid}`);
+  res.redirect("/admin");
+});
+
+// Доступ к inject.js для разрешённых пользователей
 app.get("/:uid", (req, res) => {
   const uid = req.params.uid;
   if (allowedUsers.includes(uid)) {
