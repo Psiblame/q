@@ -26,6 +26,7 @@ app.get("/", (req, res) => {
 // Basic-авторизация для /admin
 app.use("/admin", (req, res, next) => {
   const auth = req.headers.authorization;
+  console.log(`Authorization header: ${auth}`); // Логируем заголовок для диагностики
 
   if (!auth) {
     res.set("WWW-Authenticate", 'Basic realm="Admin Panel"');
@@ -34,51 +35,22 @@ app.use("/admin", (req, res, next) => {
 
   const [scheme, encoded] = auth.split(" ");
   if (scheme !== "Basic") {
+    console.log(`Invalid auth scheme: ${scheme}`);
     res.set("WWW-Authenticate", 'Basic realm="Admin Panel"');
     return res.status(401).send("Неверная схема авторизации");
   }
 
   const decoded = Buffer.from(encoded, "base64").toString();
   const [login, password] = decoded.split(":");
+  console.log(`Login attempt: ${login}`); // Логируем логин
 
   if (login === adminLogin && password === adminPassword) {
     next();
   } else {
+    console.log(`Failed login: ${login}/${password}`);
     res.set("WWW-Authenticate", 'Basic realm="Admin Panel"');
     res.status(401).send("Неверный логин или пароль");
   }
-});
-
-// Доступ к inject.js для разрешённых пользователей
-app.get("/:uid", (req, res) => {
-  const uid = req.params.uid;
-  if (allowedUsers.includes(uid)) {
-    const filePath = path.join(__dirname, "public", "inject.js");
-    if (fs.existsSync(filePath)) {
-      res.sendFile(filePath);
-    } else {
-      res.status(404).send("Файл inject.js не найден");
-    }
-  } else {
-    res.status(403).send("Нет доступа к этой ссылке");
-  }
-});
-
-// Получение вопроса
-app.post("/manual-review", (req, res) => {
-  const { questionID, questionHTML, imageUrl } = req.body;
-  if (!questionID || !questionHTML) {
-    return res.status(400).json({ error: "Отсутствует questionID или questionHTML" });
-  }
-  questions[questionID] = { html: questionHTML, imageUrl };
-  res.status(200).json({ message: "Вопрос успешно сохранён", questionID });
-});
-
-// Отправка ответа
-app.get("/get-answer/:questionID", (req, res) => {
-  const { questionID } = req.params;
-  const answer = answers[questionID] || null;
-  res.json({ answer });
 });
 
 // Панель администратора
@@ -120,7 +92,7 @@ app.get("/admin", (req, res) => {
     `;
     res.send(html);
   } catch (error) {
-    console.error(error);
+    console.error(`Admin panel error: ${error.message}`);
     res.status(500).send("Ошибка при генерации админ-панели");
   }
 });
@@ -135,9 +107,43 @@ app.post("/answer", (req, res) => {
   res.redirect("/admin");
 });
 
+// Получение вопроса
+app.post("/manual-review", (req, res) => {
+  const { questionID, questionHTML, imageUrl } = req.body;
+  if (!questionID || !questionHTML) {
+    return res.status(400).json({ error: "Отсутствует questionID или questionHTML" });
+  }
+  questions[questionID] = { html: questionHTML, imageUrl };
+  console.log(`Question received: ${questionID}`); // Логируем получение вопроса
+  res.status(200).json({ message: "Вопрос успешно сохранён", questionID });
+});
+
+// Отправка ответа
+app.get("/get-answer/:questionID", (req, res) => {
+  const { questionID } = req.params;
+  const answer = answers[questionID] || null;
+  res.json({ answer });
+});
+
+// Доступ к inject.js для разрешённых пользователей (последний маршрут!)
+app.get("/:uid", (req, res) => {
+  const uid = req.params.uid;
+  if (allowedUsers.includes(uid)) {
+    const filePath = path.join(__dirname, "public", "inject.js");
+    if (fs.existsSync(filePath)) {
+      res.sendFile(filePath);
+    } else {
+      res.status(404).send("Файл inject.js не найден");
+    }
+  } else {
+    console.log(`Unauthorized access attempt: ${uid}`);
+    res.status(403).send("Нет доступа к этой ссылке");
+  }
+});
+
 // Обработка ошибок
 app.use((err, req, res, next) => {
-  console.error(err.stack);
+  console.error(`Server error: ${err.stack}`);
   res.status(500).json({ error: "Что-то пошло не так!" });
 });
 
