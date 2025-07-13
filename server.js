@@ -3,7 +3,6 @@ const bodyParser = require("body-parser");
 const path = require("path");
 
 const app = express();
-const PORT = process.env.PORT || 3000;
 
 const allowedUsers = ["u1", "u2", "mohir"]; // Добавляешь сюда айди
 const adminLogin = "admin";
