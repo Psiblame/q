@@ -8,7 +8,7 @@ const app = express();
 
 const allowedUsers = ["u1", "u2", "mohir"];
 const adminLogin = "psiblame";
-const adminPassword = "qwerty123";
+const adminPassword = "m0H1r_top";
 
 // Хранилище вопросов и ответов по uid
 const questions = { u1: {}, u2: {}, mohir: {} };
@@ -27,7 +27,7 @@ app.get("/", (req, res) => {
 // Basic-авторизация для /admin
 app.use("/admin", (req, res, next) => {
   const auth = req.headers.authorization;
-  console.log(`Authorization header: ${auth}`);
+  console.log(`[Server] Authorization header: ${auth}`);
 
   if (!auth) {
     res.set("WWW-Authenticate", 'Basic realm="Admin Panel"');
@@ -36,19 +36,19 @@ app.use("/admin", (req, res, next) => {
 
   const [scheme, encoded] = auth.split(" ");
   if (scheme !== "Basic") {
-    console.log(`Invalid auth scheme: ${scheme}`);
+    console.log(`[Server] Invalid auth scheme: ${scheme}`);
     res.set("WWW-Authenticate", 'Basic realm="Admin Panel"');
     return res.status(401).send("Неверная схема авторизации");
   }
 
   const decoded = Buffer.from(encoded, "base64").toString();
   const [login, password] = decoded.split(":");
-  console.log(`Login attempt: ${login}`);
+  console.log(`[Server] Login attempt: ${login}`);
 
   if (login === adminLogin && password === adminPassword) {
     next();
   } else {
-    console.log(`Failed login: ${login}/${password}`);
+    console.log(`[Server] Failed login: ${login}/${password}`);
     res.set("WWW-Authenticate", 'Basic realm="Admin Panel"');
     res.status(401).send("Неверный логин или пароль");
   }
@@ -109,7 +109,7 @@ app.get("/admin", (req, res) => {
     `;
     res.send(html);
   } catch (error) {
-    console.error(`Admin panel error: ${error.message}`);
+    console.error(`[Server] Admin panel error: ${error.message}`);
     res.status(500).send("Ошибка при генерации админ-панели");
   }
 });
@@ -121,7 +121,7 @@ app.post("/answer", (req, res) => {
     return res.status(400).json({ error: "Отсутствует uid, id или answer, или неверный uid" });
   }
   answers[uid][id] = answer.toUpperCase();
-  console.log(`Answer saved: ${uid}/${id} -> ${answer}`);
+  console.log(`[Server] Answer saved: ${uid}/${id} -> ${answer}`);
   res.redirect("/admin");
 });
 
@@ -129,18 +129,22 @@ app.post("/answer", (req, res) => {
 app.post("/manual-review/:uid", (req, res) => {
   const { uid } = req.params;
   const { questionID, questionHTML, imageUrl } = req.body;
+  console.log(`[Server] Received request to /manual-review/${uid}: questionID=${questionID}, questionHTML=${questionHTML?.substring(0, 50)}..., imageUrl=${imageUrl}`);
   if (!uid || !questionID || !questionHTML || !allowedUsers.includes(uid)) {
+    console.log(`[Server] Invalid request: uid=${uid}, questionID=${questionID}, questionHTML=${questionHTML?.substring(0, 50)}..., allowedUsers=${allowedUsers}`);
     return res.status(400).json({ error: "Отсутствует uid, questionID или questionHTML, или неверный uid" });
   }
   questions[uid][questionID] = { html: questionHTML, imageUrl };
-  console.log(`Question received: ${uid}/${questionID}`);
+  console.log(`[Server] Question saved: ${uid}/${questionID}`);
   res.status(200).json({ message: "Вопрос успешно сохранён", questionID });
 });
 
 // Отправка ответа
 app.get("/get-answer/:uid/:questionID", (req, res) => {
   const { uid, questionID } = req.params;
+  console.log(`[Server] Request to /get-answer/${uid}/${questionID}`);
   if (!allowedUsers.includes(uid)) {
+    console.log(`[Server] Invalid uid: ${uid}`);
     return res.status(400).json({ error: "Неверный uid" });
   }
   const answer = answers[uid][questionID] || null;
@@ -151,33 +155,36 @@ app.get("/get-answer/:uid/:questionID", (req, res) => {
 app.post("/clear-questions/:uid", (req, res) => {
   const { uid } = req.params;
   if (!allowedUsers.includes(uid)) {
+    console.log(`[Server] Invalid uid for clear: ${uid}`);
     return res.status(400).json({ error: "Неверный uid" });
   }
   questions[uid] = {};
   answers[uid] = {};
-  console.log(`Questions and answers cleared for: ${uid}`);
+  console.log(`[Server] Questions and answers cleared for: ${uid}`);
   res.redirect("/admin");
 });
 
 // Доступ к inject.js для разрешённых пользователей
 app.get("/:uid", (req, res) => {
   const uid = req.params.uid;
+  console.log(`[Server] Request to /${uid}`);
   if (allowedUsers.includes(uid)) {
     const filePath = path.join(__dirname, "public", "inject.js");
     if (fs.existsSync(filePath)) {
       res.sendFile(filePath);
     } else {
+      console.log(`[Server] File not found: ${filePath}`);
       res.status(404).send("Файл inject.js не найден");
     }
   } else {
-    console.log(`Unauthorized access attempt: ${uid}`);
+    console.log(`[Server] Unauthorized access attempt: ${uid}`);
     res.status(403).send("Нет доступа к этой ссылке");
   }
 });
 
 // Обработка ошибок
 app.use((err, req, res, next) => {
-  console.error(`Server error: ${err.stack}`);
+  console.error(`[Server] Server error: ${err.stack}`);
   res.status(500).json({ error: "Что-то пошло не так!" });
 });
 
@@ -185,5 +192,5 @@ app.use((err, req, res, next) => {
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
-  console.log(`Сервер запущен на порту ${PORT}`);
+  console.log(`[Server] Сервер запущен на порту ${PORT}`);
 });
