@@ -1,73 +1,64 @@
 const express = require("express");
 const bodyParser = require("body-parser");
+const path = require("path");
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(bodyParser.json());
-app.use(express.static("public"));
+app.use(express.static("public")); // для inject.js
 
-const questions = {};
+const questions = {}; // questionID: { html, imageUrl }
+const answers = {};   // questionID: "B"
 
+// 👉 Выдаёт inject.js по персональной ссылке
+app.get("/u:uid", (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "inject.js"));
+});
+
+// 👉 Принимает вопрос
 app.post("/manual-review", (req, res) => {
   const { questionID, questionHTML, imageUrl } = req.body;
-  if (!questionID || !questionHTML) return res.status(400).send("Invalid data");
-
-  questions[questionID] = { html: questionHTML, imageUrl, answer: null };
-  res.send({ status: "received" });
+  questions[questionID] = { html: questionHTML, imageUrl };
+  res.sendStatus(200);
 });
 
-app.get("/get-answer/:id", (req, res) => {
-  const q = questions[req.params.id];
-  if (!q || !q.answer) return res.json({ answer: null });
-  res.json({ answer: q.answer });
+// 👉 Отдаёт ответ
+app.get("/get-answer/:questionID", (req, res) => {
+  const { questionID } = req.params;
+  const answer = answers[questionID] || null;
+  res.json({ answer });
 });
 
-app.post("/submit-answer", (req, res) => {
-  const { id, answer } = req.body;
-  if (!questions[id]) return res.status(404).send("Question not found");
-
-  questions[id].answer = answer;
-  res.json({ status: "saved" });
-});
-
+// 👉 Панель администратора
 app.get("/admin", (req, res) => {
-  let html = `<h1>Admin panel — вопросы</h1>`;
-  for (const id in questions) {
-    const q = questions[id];
+  let html = `<h2>Admin panel — Вопросы</h2>`;
+  for (const [id, q] of Object.entries(questions)) {
     html += `
-      <div style="border:1px solid #ccc; margin:10px; padding:10px;">
-        <b>ID:</b> ${id}<br/>
-        ${q.imageUrl ? `<img src="${q.imageUrl}" style="max-width:300px;"><br/>` : ""}
-        ${q.html}
-        <form onsubmit="submitAnswer(event, '${id}')">
-          <input type="text" name="answer" placeholder="Ответ (A, B, C…)" required />
+      <div style="border:1px solid #ccc; padding:10px; margin:10px;">
+        <strong>ID:</strong> ${id}<br>
+        <form method="POST" action="/answer" style="margin-top:5px;">
+          <textarea name="id" hidden>${id}</textarea>
+          ${q.imageUrl ? `<img src="${q.imageUrl}" style="max-width:300px;"><br>` : ""}
+          <div style="max-height:150px; overflow:auto;">${q.html}</div>
+          <input name="answer" placeholder="Введите ответ (напр. A)" required>
           <button type="submit">Отправить</button>
         </form>
       </div>
     `;
   }
-
-  html += `
-  <script>
-    function submitAnswer(e, id) {
-      e.preventDefault();
-      const form = e.target;
-      const answer = form.answer.value.trim();
-      fetch('/submit-answer', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id, answer })
-      }).then(r => r.json()).then(() => {
-        alert('Ответ сохранён');
-        form.answer.value = '';
-      });
-    }
-  </script>
-  `;
-
   res.send(html);
 });
 
+// 👉 Обработка отправки ответа
+app.use(bodyParser.urlencoded({ extended: true }));
+app.post("/answer", (req, res) => {
+  const { id, answer } = req.body;
+  answers[id] = answer.toUpperCase();
+  res.redirect("/admin");
+});
+
+// 🟢 Запуск сервера
 app.listen(PORT, () => {
-  console.log("Server started on port " + PORT);
+  console.log(`Server is running on port ${PORT}`);
 });
