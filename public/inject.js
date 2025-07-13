@@ -67,7 +67,8 @@ function getCurrentQuestionNumber() {
     ".question-header",
     ".question-title",
     "[class*='question']",
-    "[id*='question']"
+    "[id*='question']",
+    "div, span, p" // Резервный селектор
   ];
   for (const selector of selectors) {
     const elements = document.querySelectorAll(selector);
@@ -80,16 +81,23 @@ function getCurrentQuestionNumber() {
       }
     }
   }
-  console.log("[Inject] Could not find question number, using fallback");
+  console.log("[Inject] Could not find question number");
   return null;
 }
 
+// Ручной запуск обработки вопроса через консоль
+window.manualSetQuestion = function(questionNumber) {
+  console.log(`[Inject] Manually set question number: ${questionNumber}`);
+  handleQuestion(questionNumber);
+};
+
 // Функция для обработки вопроса
-async function handleQuestion() {
-  let questionNumber = getCurrentQuestionNumber();
+async function handleQuestion(manualQuestionNumber = null) {
+  let questionNumber = manualQuestionNumber || getCurrentQuestionNumber();
   let questionID = questionNumber ? `q${questionNumber}` : `q${Date.now()}`; // Резервный ID
 
   if (questionID === currentQuestionId) {
+    console.log(`[Inject] Question ${questionID} already active, skipping`);
     return;
   }
 
@@ -106,11 +114,11 @@ async function handleQuestion() {
   if (!box) {
     box = createBox(questionID);
     // Собираем содержимое вопроса
-    const visible = [...document.querySelectorAll("[class*='question'], [class*='test'], [class*='pane'], [id*='question']")]
+    const visible = [...document.querySelectorAll("body > *:not(script):not(style)")]
       .filter(el => el.offsetParent !== null)
       .map(el => el.outerHTML)
       .join("<hr>");
-    const img = document.querySelector("img.question-image") || document.querySelector("img");
+    const img = document.querySelector("img") || null;
     const imageUrl = img?.src || null;
 
     // Отправка вопроса
@@ -143,6 +151,7 @@ async function handleQuestion() {
     // Периодический опрос ответа
     async function pollAnswer() {
       try {
+        console.log(`[Inject] Polling answer for ${questionID}`);
         const res = await fetch(`${SERVER}/get-answer/${uid}/${questionID}`);
         if (!res.ok) {
           throw new Error(`Ошибка сервера: ${res.status}`);
@@ -183,3 +192,11 @@ observer.observe(document.body, {
 // Запускаем обработку текущего вопроса
 console.log("[Inject] Starting initial question handling");
 handleQuestion();
+
+// Резервный запуск через setTimeout
+setTimeout(() => {
+  if (!currentQuestionId) {
+    console.log("[Inject] No question detected, forcing box creation");
+    handleQuestion(1); // Попытка создать табличку для вопроса 1
+  }
+}, 5000);
