@@ -17,8 +17,8 @@ function createBox(questionID) {
     top: localStorage.getItem(`boxPosition_${uid}_${questionID}_top`) || "80px",
     right: localStorage.getItem(`boxPosition_${uid}_${questionID}_right`) || "20px",
     padding: "10px",
-    backgroundColor: "rgba(255, 255, 255, 0.1)", // Ещё прозрачнее
-    color: "rgba(0, 0, 0, 0.2)", // Текст ещё прозрачнее
+    backgroundColor: "rgba(255, 255, 255, 0.1)",
+    color: "rgba(0, 0, 0, 0.2)",
     fontWeight: "bold",
     borderRadius: "6px",
     zIndex: 1000,
@@ -70,7 +70,7 @@ document.addEventListener("keydown", (e) => {
     if (box) {
       box.visible = !box.visible;
       box.element.style.display = box.visible ? "block" : "none";
-      localStorage.setItem(`boxVisible_${uid}_${currentQuestionId}`, box.visible);
+      localStorage.setItem(`boxVisible_${uid}_${questionID}`, box.visible);
       console.log(`[Inject] Toggled visibility for ${currentQuestionId}: ${box.visible}`);
     }
   }
@@ -101,6 +101,7 @@ function getCurrentQuestionNumber() {
 
 // Получение данных текущего вопроса
 function getCurrentQuestion(questionNumber) {
+  // Проверка window.questions
   if (window.questions && window.questions[questionNumber - 1]) {
     const q = window.questions[questionNumber - 1];
     console.log(`[Inject] Found question q${questionNumber} in window.questions`);
@@ -108,12 +109,12 @@ function getCurrentQuestion(questionNumber) {
       questionID: `q${questionNumber}`,
       questionHTML: `
         <div class="question-wrap">
-          <div class="question-text">${q.question}</div>
-          <span class="ball-badge">Балл: ${q.ball}</span>
-          <div class="answers">${Object.entries(q.answers)
-            .map(([key, text]) => `<div class="answer"><span class="answer-letter">${key.toUpperCase()}</span> ${text}</div>`)
-            .join("")}</div>
-          <div class="author">${q.author}</div>
+          <div class="question-text">${q.question || ''}</div>
+          <span class="ball-badge">Балл: ${q.ball || 'N/A'}</span>
+          <div class="answers">${q.answers ? Object.entries(q.answers)
+            .map(([key, text]) => `<div class="answer"><span class="answer-letter">${key.toUpperCase()}</span> ${text || ''}</div>`)
+            .join("") : ''}</div>
+          <div class="author">${q.author || 'Unknown'}</div>
         </div>`,
       imageUrl: null
     };
@@ -169,13 +170,15 @@ async function sendQuestion(questionNumber) {
 // Обработка кликов на вопросы и ответы
 function setupClickHandlers() {
   document.querySelectorAll(".qnum").forEach(qnum => {
-    qnum.removeEventListener("click", handleClick); // Удаляем старые обработчики
+    qnum.removeEventListener("click", handleClick);
     qnum.addEventListener("click", handleClick);
   });
   document.querySelectorAll(".answer").forEach(answer => {
     answer.removeEventListener("click", handleClick);
     answer.addEventListener("click", handleClick);
-менно на вопрос или ответ
+  });
+}
+
 function handleClick() {
   const num = getCurrentQuestionNumber();
   if (num) {
