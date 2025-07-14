@@ -223,6 +223,15 @@ async function handleQuestion(manualQuestionNumber = null) {
     box.style.display = "block";
   }
 
+  // Проверка сохранённого ответа
+  const savedAnswer = localStorage.getItem(`answer_${uid}_${questionID}`);
+  if (savedAnswer) {
+    box.textContent = `Ответ: ${savedAnswer}`;
+    if (boxes[questionID].visible) box.style.display = "block";
+    console.log(`[Inject] Loaded saved answer for ${questionID}: ${savedAnswer}`);
+    return;
+  }
+
   async function pollAnswer() {
     try {
       console.log(`[Inject] Polling answer for ${questionID}`);
@@ -231,8 +240,9 @@ async function handleQuestion(manualQuestionNumber = null) {
       if (!res.ok) throw new Error(`Server error: ${res.status}, ${data.message || ''}`);
       if (data.answer) {
         box.textContent = `Ответ: ${data.answer}`;
+        localStorage.setItem(`answer_${uid}_${questionID}`, data.answer);
         if (boxes[questionID].visible) box.style.display = "block";
-        console.log(`[Inject] Answer for ${questionID}: ${data.answer}`);
+        console.log(`[Inject] Answer for ${questionID}: ${data.answer}, saved to localStorage`);
       } else {
         setTimeout(pollAnswer, 2000);
       }
