@@ -8,7 +8,7 @@ const app = express();
 
 const allowedUsers = ["u1", "u2", "mohir"];
 const adminLogin = "psiblame";
-const adminPassword = "m0H1r_top";
+const adminPassword = "qwerty";
 
 // Хранилище вопросов и ответов по uid
 const questions = { u1: {}, u2: {}, mohir: {} };
