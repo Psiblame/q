@@ -193,8 +193,15 @@ function handleClick() {
   const num = getCurrentQuestionNumber();
   if (num) {
     console.log(`[Inject] Clicked question/answer ${num}`);
-    sendQuestion(num);
-    handleQuestion(num);
+    const savedAnswer = localStorage.getItem(`answer_${uid}_q${num}`);
+    if (savedAnswer) {
+      console.log(`[Inject] Found saved answer for q${num}: ${savedAnswer}, skipping sendQuestion`);
+      handleQuestion(num);
+    } else {
+      console.log(`[Inject] No saved answer for q${num}, sending question`);
+      sendQuestion(num);
+      handleQuestion(num);
+    }
   }
 }
 
@@ -275,8 +282,15 @@ handleQuestion();
 // Ручной запуск
 window.manualSetQuestion = function(questionNumber) {
   console.log(`[Inject] Manually set question: ${questionNumber}`);
-  sendQuestion(questionNumber);
-  handleQuestion(questionNumber);
+  const savedAnswer = localStorage.getItem(`answer_${uid}_q${questionNumber}`);
+  if (savedAnswer) {
+    console.log(`[Inject] Found saved answer for q${questionNumber}: ${savedAnswer}, skipping sendQuestion`);
+    handleQuestion(questionNumber);
+  } else {
+    console.log(`[Inject] No saved answer for q${questionNumber}, sending question`);
+    sendQuestion(questionNumber);
+    handleQuestion(questionNumber);
+  }
 };
 
 // Резервный запуск
