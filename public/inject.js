@@ -1,16 +1,15 @@
 const SERVER = "https://q-nq3n.onrender.com";
 const scriptSrc = document.currentScript?.src || "https://q-nq3n.onrender.com/u1";
 const uid = scriptSrc.match(/\/(u1|u2|mohir)/)?.[1] || "u1";
-const boxes = {};
+let box = null;
 let currentQuestionId = null;
 
 console.log(`[Inject] UID: ${uid}, Script loaded`);
 
 // Создание таблички
-function createBox(questionID) {
-  console.log(`[Inject] Creating box for ${questionID}`);
+function createBox() {
+  console.log(`[Inject] Creating box`);
   const box = document.createElement("div");
-  box.dataset.questionId = questionID;
   box.textContent = "Ждём ответ...";
   Object.assign(box.style, {
     position: "fixed",
@@ -30,7 +29,6 @@ function createBox(questionID) {
     transition: "opacity 0.3s"
   });
   document.body.appendChild(box);
-  boxes[questionID] = { element: box, visible: localStorage.getItem(`boxVisible_${uid}`) !== "false" };
 
   // Перетаскивание
   let isDragging = false;
@@ -39,7 +37,7 @@ function createBox(questionID) {
     isDragging = true;
     currentX = e.clientX - parseFloat(box.style.left || box.getBoundingClientRect().left);
     currentY = e.clientY - parseFloat(box.style.top || box.getBoundingClientRect().top);
-    console.log(`[Inject] Started dragging ${questionID}`);
+    console.log(`[Inject] Started dragging`);
   });
   document.addEventListener("mousemove", (e) => {
     if (isDragging) {
@@ -54,7 +52,7 @@ function createBox(questionID) {
       isDragging = false;
       localStorage.setItem(`boxPosition_${uid}_top`, box.style.top);
       localStorage.setItem(`boxPosition_${uid}_right`, "auto");
-      console.log(`[Inject] Stopped dragging ${questionID}, position: top=${box.style.top}, left=${box.style.left}`);
+      console.log(`[Inject] Stopped dragging, position: top=${box.style.top}, left=${box.style.left}`);
     }
   });
 
@@ -65,13 +63,10 @@ function createBox(questionID) {
 const keysPressed = new Set();
 document.addEventListener("keydown", (e) => {
   keysPressed.add(e.key.toLowerCase());
-  if (keysPressed.has("control") && keysPressed.has("z") && currentQuestionId) {
+  if (keysPressed.has("control") && keysPressed.has("z") && box) {
     const visible = localStorage.getItem(`boxVisible_${uid}`) !== "false";
     localStorage.setItem(`boxVisible_${uid}`, !visible);
-    Object.values(boxes).forEach(box => {
-      box.visible = !visible;
-      box.element.style.display = box.visible ? "block" : "none";
-    });
+    box.style.display = !visible ? "block" : "none";
     console.log(`[Inject] Toggled visibility: ${!visible}`);
   }
 });
@@ -129,7 +124,7 @@ function getAllQuestions() {
   return [];
 }
 
-// Отправка всех вопросов с повторными попытками
+// Отправка всех вопросов
 async function sendAllQuestions() {
   const questions = getAllQuestions();
   if (!questions.length) {
@@ -146,8 +141,9 @@ async function sendAllQuestions() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(q),
         });
-        if (!response.ok) throw new Error(`Server error: ${response.status}`);
-        console.log(`[Inject] Question ${q.questionID} sent`);
+        const result = await response.json();
+        if (!response.ok) throw new Error(`Server error: ${response.status}, ${result.message || ''}`);
+        console.log(`[Inject] Question ${q.questionID} sent: ${result.message}`);
         break;
       } catch (error) {
         console.error(`[Inject] Error sending ${q.questionID}: ${error.message}, retries left: ${retries}`);
@@ -182,35 +178,33 @@ async function handleQuestion(manualQuestionNumber = null) {
   }
 
   console.log(`[Inject] Handling question: ${questionID}`);
-  Object.values(boxes).forEach(box => box.element.style.display = "none");
   currentQuestionId = questionID;
 
-  let box = boxes[questionID]?.element;
   if (!box) {
-    box = createBox(questionID);
-    async function pollAnswer() {
-      try {
-        console.log(`[Inject] Polling answer for ${questionID}`);
-        const res = await fetch(`${SERVER}/get-answer/${uid}/${questionID}`);
-        if (!res.ok) throw new Error(`Server error: ${res.status}`);
-        const data = await res.json();
-        if (data.answer) {
-          box.textContent = `Ответ: ${data.answer}`;
-          if (boxes[questionID].visible) box.style.display = "block";
-          console.log(`[Inject] Answer for ${questionID}: ${data.answer}`);
-        } else {
-          setTimeout(pollAnswer, 2000);
-        }
-      } catch (error) {
-        box.textContent = `Ошибка: ${error.message}`;
-        console.error(`[Inject] Error polling ${questionID}: ${error.message}`);
+    box = createBox();
+  }
+  box.dataset.questionId = questionID;
+
+  async function pollAnswer() {
+    try {
+      console.log(`[Inject] Polling answer for ${questionID}`);
+      const res = await fetch(`${SERVER}/get-answer/${uid}/${questionID}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(`Server error: ${res.status}, ${data.message || ''}`);
+      if (data.answer) {
+        box.textContent = `Ответ: ${data.answer}`;
+        if (localStorage.getItem(`boxVisible_${uid}`) !== "false") box.style.display = "block";
+        console.log(`[Inject] Answer for ${questionID}: ${data.answer}`);
+      } else {
         setTimeout(pollAnswer, 2000);
       }
+    } catch (error) {
+      box.textContent = `Ошибка: ${error.message}`;
+      console.error(`[Inject] Error polling ${questionID}: ${error.message}`);
+      setTimeout(pollAnswer, 2000);
     }
-    pollAnswer();
-  } else if (boxes[questionID].visible) {
-    box.style.display = "block";
   }
+  pollAnswer();
 }
 
 // Отслеживание изменений DOM
