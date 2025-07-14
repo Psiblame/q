@@ -12,7 +12,9 @@ function createBox(questionID) {
   console.log(`[Inject] Creating box for ${questionID}`);
   const box = document.createElement("div");
   box.dataset.questionId = questionID;
-  box.textContent = localStorage.getItem(`boxText_${uid}_${questionID}`) || "Ждём ответ...";
+  const savedAnswer = localStorage.getItem(`boxAnswer_${uid}_${questionID}`);
+  box.textContent = savedAnswer ? `Ответ: ${savedAnswer}` : 
+    (localStorage.getItem(`boxText_${uid}_${questionID}`) || "Ждём ответ...");
   Object.assign(box.style, {
     position: "fixed",
     top: localStorage.getItem(`boxPosition_${uid}_${questionID}_top`) || "80px",
@@ -177,6 +179,10 @@ async function sendQuestion(questionNumber) {
 
 // Запуск опроса ответа для вопроса
 function startPolling(questionID) {
+  if (localStorage.getItem(`boxAnswer_${uid}_${questionID}`)) {
+    console.log(`[Inject] Answer for ${questionID} already saved locally`);
+    return;
+  }
   if (polls[questionID]) {
     clearTimeout(polls[questionID]);
     console.log(`[Inject] Cleared previous poll for ${questionID}`);
@@ -189,8 +195,10 @@ function startPolling(questionID) {
       const data = await res.json();
       if (!res.ok) throw new Error(`Server error: ${res.status}, ${data.message || ''}`);
       if (data.answer && boxes[questionID]) {
-        boxes[questionID].element.textContent = `Ответ: ${data.answer}`;
-        localStorage.setItem(`boxText_${uid}_${questionID}`, boxes[questionID].element.textContent);
+        const answerText = `Ответ: ${data.answer}`;
+        boxes[questionID].element.textContent = answerText;
+        localStorage.setItem(`boxAnswer_${uid}_${questionID}`, data.answer);
+        localStorage.setItem(`boxText_${uid}_${questionID}`, answerText);
         if (boxes[questionID].visible && questionID === currentQuestionId) {
           boxes[questionID].element.style.display = "block";
         }
