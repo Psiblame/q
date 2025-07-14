@@ -1,134 +1,112 @@
 const SERVER = "https://q-nq3n.onrender.com";
-// Извлекаем uid из пути скрипта
 const scriptSrc = document.currentScript?.src || "https://q-nq3n.onrender.com/u1";
 const uid = scriptSrc.match(/\/(u1|u2|mohir)/)?.[1] || "u1";
 const boxes = {};
 let currentQuestionId = null;
 
-console.log(`[Inject] UID: ${uid}, Script loaded from: ${scriptSrc}`);
+console.log(`[Inject] UID: ${uid}, Script loaded`);
 
-// Функция для создания таблички
+// Создание таблички
 function createBox(questionID) {
-  console.log(`[Inject] Creating box for questionID: ${questionID}`);
+  console.log(`[Inject] Creating box for ${questionID}`);
   const box = document.createElement("div");
   box.dataset.questionId = questionID;
   box.textContent = "Ждём ответ...";
   Object.assign(box.style, {
     position: "fixed",
-    top: "20px",
+    top: "80px",
     right: "20px",
     padding: "10px",
     backgroundColor: "rgba(255, 255, 255, 0.9)",
     color: "#000",
     fontWeight: "bold",
     borderRadius: "6px",
-    zIndex: 9999,
-    transition: "opacity 0.3s",
+    zIndex: 1000,
     border: "1px solid rgba(0, 0, 0, 0.1)",
     boxShadow: "0 2px 4px rgba(0, 0, 0, 0.1)",
     display: "none"
   });
   document.body.appendChild(box);
   boxes[questionID] = { element: box, visible: localStorage.getItem(`boxVisible_${uid}_${questionID}`) !== "false" };
-  if (boxes[questionID].visible) {
-    box.style.display = "block";
-  }
+  if (boxes[questionID].visible) box.style.display = "block";
   return box;
 }
 
-// Управление видимостью таблички
+// Управление видимостью (Ctrl+Z)
 const keysPressed = new Set();
 document.addEventListener("keydown", (e) => {
   keysPressed.add(e.key.toLowerCase());
   if (keysPressed.has("control") && keysPressed.has("z") && currentQuestionId) {
     const box = boxes[currentQuestionId];
-    if (box) {
-      box.visible = !box.visible;
-      box.element.style.display = box.visible ? "block" : "none";
-      localStorage.setItem(`boxVisible_${uid}_${currentQuestionId}`, box.visible);
-      console.log(`[Inject] Toggled visibility for ${currentQuestionId}: ${box.visible}`);
-    }
+    box.visible = !box.visible;
+    box.element.style.display = box.visible ? "block" : "none";
+    localStorage.setItem(`boxVisible_${uid}_${currentQuestionId}`, box.visible);
+    console.log(`[Inject] Toggled visibility for ${currentQuestionId}: ${box.visible}`);
   }
 });
+document.addEventListener("keyup", (e) => keysPressed.delete(e.key.toLowerCase()));
 
-document.addEventListener("keyup", (e) => {
-  keysPressed.delete(e.key.toLowerCase());
-});
-
-// Функция для получения номера текущего вопроса
+// Получение номера вопроса
 function getCurrentQuestionNumber() {
-  const selectors = [
-    "[class*='question-number']",
-    "[class*='question-id']",
-    "[class*='current-question']",
-    "[data-question-number]",
-    "[data-question-id]",
-    "h1, h2, h3, h4",
-    ".question-header",
-    ".question-title",
-    "[class*='question']",
-    "[id*='question']",
-    "div, span, p" // Резервный селектор
-  ];
-  for (const selector of selectors) {
-    const elements = document.querySelectorAll(selector);
-    for (const element of elements) {
-      const text = element.textContent.toLowerCase();
-      const match = text.match(/вопрос\s*(\d+)/i) || text.match(/question\s*(\d+)/i) || text.match(/^\d+/);
-      if (match) {
-        console.log(`[Inject] Found question number: ${match[1]} from selector: ${selector}`);
-        return parseInt(match[1]);
-      }
+  const progress = document.querySelector(".progress");
+  if (progress) {
+    const match = progress.textContent.match(/(\d+)\/\d+/);
+    if (match) {
+      console.log(`[Inject] Found question number in .progress: ${match[1]}`);
+      return parseInt(match[1]);
+    }
+  }
+  const currentQnum = document.querySelector(".qnum.current");
+  if (currentQnum) {
+    const num = parseInt(currentQnum.textContent);
+    if (num) {
+      console.log(`[Inject] Found question number in .qnum.current: ${num}`);
+      return num;
     }
   }
   console.log("[Inject] Could not find question number");
   return null;
 }
 
-// Ручной запуск обработки вопроса через консоль
+// Ручной запуск
 window.manualSetQuestion = function(questionNumber) {
-  console.log(`[Inject] Manually set question number: ${questionNumber}`);
+  console.log(`[Inject] Manually set question: ${questionNumber}`);
   handleQuestion(questionNumber);
 };
 
-// Функция для обработки вопроса
+// Обработка вопроса
 async function handleQuestion(manualQuestionNumber = null) {
   let questionNumber = manualQuestionNumber || getCurrentQuestionNumber();
-  let questionID = questionNumber ? `q${questionNumber}` : `q${Date.now()}`; // Резервный ID
+  if (!questionNumber || questionNumber < 1 || questionNumber > 10) {
+    console.log(`[Inject] Invalid question number: ${questionNumber}, using fallback`);
+    questionNumber = 1;
+  }
+  let questionID = `q${questionNumber}`;
 
   if (questionID === currentQuestionId) {
-    console.log(`[Inject] Question ${questionID} already active, skipping`);
+    console.log(`[Inject] Question ${questionID} already active`);
     return;
   }
 
   console.log(`[Inject] Handling question: ${questionID}`);
-  // Скрываем все таблички
-  Object.values(boxes).forEach(box => {
-    box.element.style.display = "none";
-  });
-
+  Object.values(boxes).forEach(box => box.element.style.display = "none");
   currentQuestionId = questionID;
 
-  // Показываем или создаём табличку
   let box = boxes[questionID]?.element;
   if (!box) {
     box = createBox(questionID);
-    // Собираем содержимое вопроса
-    const visible = [...document.querySelectorAll("body > *:not(script):not(style)")]
-      .filter(el => el.offsetParent !== null)
-      .map(el => el.outerHTML)
-      .join("<hr>");
+    const questionWrap = document.querySelector(".question-wrap");
+    const visible = questionWrap ? questionWrap.outerHTML : "";
     const img = document.querySelector("img") || null;
     const imageUrl = img?.src || null;
 
-    // Отправка вопроса
     try {
       if (!visible) {
         box.textContent = "Ошибка: Не удалось собрать вопрос";
-        console.log(`[Inject] No visible content for question ${questionID}`);
+        console.log(`[Inject] No content for ${questionID}`);
         return;
       }
-      console.log(`[Inject] Sending question ${questionID} to ${SERVER}/manual-review/${uid}`);
+      console.log(`[Inject] Sending ${questionID} to ${SERVER}/manual-review/${uid}`);
       const response = await fetch(`${SERVER}/manual-review/${uid}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -138,37 +116,30 @@ async function handleQuestion(manualQuestionNumber = null) {
           imageUrl,
         }),
       });
-      if (!response.ok) {
-        throw new Error(`Ошибка сервера: ${response.status}`);
-      }
+      if (!response.ok) throw new Error(`Server error: ${response.status}`);
       box.textContent = "Вопрос отправлен, ждём ответ...";
-      console.log(`[Inject] Question ${questionID} sent successfully`);
+      console.log(`[Inject] Question ${questionID} sent`);
     } catch (error) {
       box.textContent = `Ошибка: ${error.message}`;
-      console.error(`[Inject] Error sending question: ${error.message}`);
+      console.error(`[Inject] Error sending ${questionID}: ${error.message}`);
     }
 
-    // Периодический опрос ответа
     async function pollAnswer() {
       try {
         console.log(`[Inject] Polling answer for ${questionID}`);
         const res = await fetch(`${SERVER}/get-answer/${uid}/${questionID}`);
-        if (!res.ok) {
-          throw new Error(`Ошибка сервера: ${res.status}`);
-        }
+        if (!res.ok) throw new Error(`Server error: ${res.status}`);
         const data = await res.json();
         if (data.answer) {
           box.textContent = `Ответ: ${data.answer}`;
-          if (boxes[questionID].visible) {
-            box.style.display = "block";
-          }
-          console.log(`[Inject] Received answer for ${questionID}: ${data.answer}`);
+          if (boxes[questionID].visible) box.style.display = "block";
+          console.log(`[Inject] Answer for ${questionID}: ${data.answer}`);
         } else {
           setTimeout(pollAnswer, 2000);
         }
       } catch (error) {
         box.textContent = `Ошибка: ${error.message}`;
-        console.error(`[Inject] Error polling answer: ${error.message}`);
+        console.error(`[Inject] Error polling ${questionID}: ${error.message}`);
         setTimeout(pollAnswer, 2000);
       }
     }
@@ -178,25 +149,25 @@ async function handleQuestion(manualQuestionNumber = null) {
   }
 }
 
-// Отслеживание изменений на странице
+// Отслеживание изменений DOM
 const observer = new MutationObserver(() => {
-  console.log("[Inject] DOM changed, checking for new question");
+  console.log("[Inject] DOM changed, checking question");
   handleQuestion();
 });
-
 observer.observe(document.body, {
   childList: true,
-  subtree: true
+  subtree: true,
+  attributes: true,
 });
 
-// Запускаем обработку текущего вопроса
-console.log("[Inject] Starting initial question handling");
+// Первичная обработка
+console.log("[Inject] Initializing");
 handleQuestion();
 
-// Резервный запуск через setTimeout
+// Резервный запуск
 setTimeout(() => {
   if (!currentQuestionId) {
-    console.log("[Inject] No question detected, forcing box creation");
-    handleQuestion(1); // Попытка создать табличку для вопроса 1
+    console.log("[Inject] No question detected, forcing q1");
+    handleQuestion(1);
   }
 }, 5000);
