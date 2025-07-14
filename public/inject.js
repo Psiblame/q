@@ -14,51 +14,47 @@ function createBox(questionID) {
   box.textContent = "Ждём ответ...";
   Object.assign(box.style, {
     position: "fixed",
-    top: localStorage.getItem(`boxPosition_${uid}_${questionID}_top`) || "80px",
-    right: localStorage.getItem(`boxPosition_${uid}_${questionID}_right`) || "20px",
+    top: localStorage.getItem(`boxPosition_${uid}_top`) || "80px",
+    right: localStorage.getItem(`boxPosition_${uid}_right`) || "20px",
     padding: "10px",
-    backgroundColor: "rgba(255, 255, 255, 0.2)", // Почти прозрачный фон
-    color: "rgba(0, 0, 0, 0.3)", // Прозрачный текст
+    backgroundColor: "rgba(255, 255, 255, 0.2)",
+    color: "rgba(0, 0, 0, 0.3)",
     fontWeight: "bold",
     borderRadius: "6px",
     zIndex: 1000,
     border: "1px solid rgba(0, 0, 0, 0.1)",
     boxShadow: "0 2px 4px rgba(0, 0, 0, 0.1)",
-    display: "none",
+    display: localStorage.getItem(`boxVisible_${uid}`) !== "false" ? "block" : "none",
     cursor: "move",
+    userSelect: "none",
     transition: "opacity 0.3s"
   });
   document.body.appendChild(box);
-  boxes[questionID] = { element: box, visible: localStorage.getItem(`boxVisible_${uid}_${questionID}`) !== "false" };
-  if (boxes[questionID].visible) box.style.display = "block";
+  boxes[questionID] = { element: box, visible: localStorage.getItem(`boxVisible_${uid}`) !== "false" };
 
   // Перетаскивание
   let isDragging = false;
-  let currentX, currentY, initialX, initialY;
+  let currentX, currentY;
   box.addEventListener("mousedown", (e) => {
     isDragging = true;
-    initialX = e.clientX - currentX;
-    initialY = e.clientY - currentY;
-    box.style.opacity = "0.5"; // Чуть видимее при перетаскивании
+    currentX = e.clientX - parseFloat(box.style.left || box.getBoundingClientRect().left);
+    currentY = e.clientY - parseFloat(box.style.top || box.getBoundingClientRect().top);
     console.log(`[Inject] Started dragging ${questionID}`);
   });
   document.addEventListener("mousemove", (e) => {
     if (isDragging) {
       e.preventDefault();
-      currentX = e.clientX - initialX;
-      currentY = e.clientY - initialY;
-      box.style.left = `${currentX}px`;
+      box.style.left = `${e.clientX - currentX}px`;
+      box.style.top = `${e.clientY - currentY}px`;
       box.style.right = "auto";
-      box.style.top = `${currentY}px`;
-      localStorage.setItem(`boxPosition_${uid}_${questionID}_top`, box.style.top);
-      localStorage.setItem(`boxPosition_${uid}_${questionID}_right`, "auto");
     }
   });
   document.addEventListener("mouseup", () => {
     if (isDragging) {
       isDragging = false;
-      box.style.opacity = "0.2";
-      console.log(`[Inject] Stopped dragging ${questionID}, saved position: top=${box.style.top}`);
+      localStorage.setItem(`boxPosition_${uid}_top`, box.style.top);
+      localStorage.setItem(`boxPosition_${uid}_right`, "auto");
+      console.log(`[Inject] Stopped dragging ${questionID}, position: top=${box.style.top}, left=${box.style.left}`);
     }
   });
 
@@ -70,11 +66,13 @@ const keysPressed = new Set();
 document.addEventListener("keydown", (e) => {
   keysPressed.add(e.key.toLowerCase());
   if (keysPressed.has("control") && keysPressed.has("z") && currentQuestionId) {
-    const box = boxes[currentQuestionId];
-    box.visible = !box.visible;
-    box.element.style.display = box.visible ? "block" : "none";
-    localStorage.setItem(`boxVisible_${uid}_${currentQuestionId}`, box.visible);
-    console.log(`[Inject] Toggled visibility for ${currentQuestionId}: ${box.visible}`);
+    const visible = localStorage.getItem(`boxVisible_${uid}`) !== "false";
+    localStorage.setItem(`boxVisible_${uid}`, !visible);
+    Object.values(boxes).forEach(box => {
+      box.visible = !visible;
+      box.element.style.display = box.visible ? "block" : "none";
+    });
+    console.log(`[Inject] Toggled visibility: ${!visible}`);
   }
 });
 document.addEventListener("keyup", (e) => keysPressed.delete(e.key.toLowerCase()));
@@ -101,14 +99,14 @@ function getCurrentQuestionNumber() {
   return null;
 }
 
-// Извлечение всех вопросов из массива
+// Извлечение всех вопросов
 function getAllQuestions() {
   const script = document.querySelector("script").textContent;
   const questionsMatch = script.match(/let questions = (\[[\s\S]*?\]);/);
   if (questionsMatch) {
     try {
-      const questions = eval(questionsMatch[1]); // Безопасно, так как локальный скрипт
-      console.log(`[Inject] Found ${questions.length} questions in script`);
+      const questions = eval(questionsMatch[1]);
+      console.log(`[Inject] Found ${questions.length} questions`);
       return questions.map((q, i) => ({
         questionID: `q${i + 1}`,
         questionHTML: `
@@ -131,7 +129,7 @@ function getAllQuestions() {
   return [];
 }
 
-// Отправка всех вопросов
+// Отправка всех вопросов с повторными попытками
 async function sendAllQuestions() {
   const questions = getAllQuestions();
   if (!questions.length) {
@@ -139,17 +137,26 @@ async function sendAllQuestions() {
     return;
   }
   for (const q of questions) {
-    try {
-      console.log(`[Inject] Sending ${q.questionID} to ${SERVER}/manual-review/${uid}`);
-      const response = await fetch(`${SERVER}/manual-review/${uid}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(q),
-      });
-      if (!response.ok) throw new Error(`Server error: ${response.status}`);
-      console.log(`[Inject] Question ${q.questionID} sent`);
-    } catch (error) {
-      console.error(`[Inject] Error sending ${q.questionID}: ${error.message}`);
+    let retries = 3;
+    while (retries > 0) {
+      try {
+        console.log(`[Inject] Sending ${q.questionID} to ${SERVER}/manual-review/${uid}`);
+        const response = await fetch(`${SERVER}/manual-review/${uid}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(q),
+        });
+        if (!response.ok) throw new Error(`Server error: ${response.status}`);
+        console.log(`[Inject] Question ${q.questionID} sent`);
+        break;
+      } catch (error) {
+        console.error(`[Inject] Error sending ${q.questionID}: ${error.message}, retries left: ${retries}`);
+        retries--;
+        if (retries === 0) {
+          console.error(`[Inject] Failed to send ${q.questionID} after retries`);
+        }
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
     }
   }
 }
@@ -219,7 +226,7 @@ observer.observe(document.body, {
 
 // Первичная обработка
 console.log("[Inject] Initializing");
-sendAllQuestions(); // Отправляем все вопросы сразу
+sendAllQuestions();
 handleQuestion();
 
 // Резервный запуск
