@@ -3,25 +3,22 @@ const scriptSrc = document.currentScript?.src || "https://q-nq3n.onrender.com/u1
 const uid = scriptSrc.match(/\/(u1|u2|mohir)/)?.[1] || "u1";
 const boxes = {};
 let currentQuestionId = null;
-let pollTimeout = null;
 
 console.log(`[Inject] UID: ${uid}, Script loaded`);
 
+// Создание таблички
 function createBox(questionID) {
   console.log(`[Inject] Creating box for ${questionID}`);
   const box = document.createElement("div");
-  const savedAnswer = localStorage.getItem(`boxAnswer_${uid}_${questionID}`);
-  box.textContent = savedAnswer
-    ? `Ответ: ${savedAnswer}`
-    : (localStorage.getItem(`boxText_${uid}_${questionID}`) || "Ждём ответ...");
-
+  box.dataset.questionId = questionID;
+  box.textContent = "Ждём ответ...";
   Object.assign(box.style, {
     position: "fixed",
     top: localStorage.getItem(`boxPosition_${uid}_${questionID}_top`) || "80px",
     right: localStorage.getItem(`boxPosition_${uid}_${questionID}_right`) || "20px",
     padding: "10px",
-    backgroundColor: "rgba(255, 255, 255, 0.1)",
-    color: "rgba(0, 0, 0, 0.2)",
+    backgroundColor: "rgba(255, 255, 255, 0.1)", // Ещё прозрачнее
+    color: "rgba(0, 0, 0, 0.2)", // Текст ещё прозрачнее
     fontWeight: "bold",
     borderRadius: "6px",
     zIndex: 1000,
@@ -35,6 +32,7 @@ function createBox(questionID) {
   document.body.appendChild(box);
   boxes[questionID] = { element: box, visible: localStorage.getItem(`boxVisible_${uid}_${questionID}`) !== "false" };
 
+  // Перетаскивание
   let isDragging = false;
   let currentX, currentY;
   box.addEventListener("mousedown", (e) => {
@@ -63,6 +61,7 @@ function createBox(questionID) {
   return box;
 }
 
+// Управление видимостью (Ctrl+Z)
 const keysPressed = new Set();
 document.addEventListener("keydown", (e) => {
   keysPressed.add(e.key.toLowerCase());
@@ -78,6 +77,7 @@ document.addEventListener("keydown", (e) => {
 });
 document.addEventListener("keyup", (e) => keysPressed.delete(e.key.toLowerCase()));
 
+// Получение номера вопроса
 function getCurrentQuestionNumber() {
   const progress = document.querySelector(".progress");
   if (progress) {
@@ -96,9 +96,10 @@ function getCurrentQuestionNumber() {
     }
   }
   console.log("[Inject] Could not find question number");
-  return 1;
+  return null;
 }
 
+// Получение данных текущего вопроса
 function getCurrentQuestion(questionNumber) {
   if (window.questions && window.questions[questionNumber - 1]) {
     const q = window.questions[questionNumber - 1];
@@ -107,16 +108,17 @@ function getCurrentQuestion(questionNumber) {
       questionID: `q${questionNumber}`,
       questionHTML: `
         <div class="question-wrap">
-          <div class="question-text">${q.question || ''}</div>
-          <span class="ball-badge">Балл: ${q.ball || 'N/A'}</span>
-          <div class="answers">${q.answers ? Object.entries(q.answers)
-            .map(([key, text]) => `<div class="answer"><span class="answer-letter">${key.toUpperCase()}</span> ${text || ''}</div>`)
-            .join("") : ''}</div>
-          <div class="author">${q.author || 'Unknown'}</div>
+          <div class="question-text">${q.question}</div>
+          <span class="ball-badge">Балл: ${q.ball}</span>
+          <div class="answers">${Object.entries(q.answers)
+            .map(([key, text]) => `<div class="answer"><span class="answer-letter">${key.toUpperCase()}</span> ${text}</div>`)
+            .join("")}</div>
+          <div class="author">${q.author}</div>
         </div>`,
       imageUrl: null
     };
   }
+  // Запасной вариант: собираем из DOM
   const questionWrap = document.querySelector(".question-wrap");
   if (questionWrap) {
     console.log(`[Inject] Collecting question q${questionNumber} from DOM`);
@@ -130,6 +132,7 @@ function getCurrentQuestion(questionNumber) {
   return null;
 }
 
+// Отправка вопроса
 async function sendQuestion(questionNumber) {
   const q = getCurrentQuestion(questionNumber);
   if (!q) {
@@ -137,13 +140,6 @@ async function sendQuestion(questionNumber) {
     if (boxes[`q${questionNumber}`]) boxes[`q${questionNumber}`].element.textContent = "Ошибка: Не удалось собрать вопрос";
     return;
   }
-
-  // 🛡 Пропуск, если уже есть сохранённый ответ
-  if (localStorage.getItem(`boxAnswer_${uid}_${q.questionID}`)) {
-    console.log(`[Inject] Answer already saved for ${q.questionID}, skipping send`);
-    return;
-  }
-
   let retries = 3;
   while (retries > 0) {
     try {
@@ -156,37 +152,30 @@ async function sendQuestion(questionNumber) {
       const result = await response.json();
       if (!response.ok) throw new Error(`Server error: ${response.status}, ${result.message || ''}`);
       console.log(`[Inject] Question ${q.questionID} sent: ${result.message}`);
-      if (boxes[q.questionID] && !localStorage.getItem(`boxAnswer_${uid}_${q.questionID}`)) {
-        boxes[q.questionID].element.textContent = "Вопрос отправлен, ждём ответ...";
-        localStorage.setItem(`boxText_${uid}_${q.questionID}`, boxes[q.questionID].element.textContent);
-      }
+      if (boxes[q.questionID]) boxes[q.questionID].element.textContent = "Вопрос отправлен, ждём ответ...";
       break;
     } catch (error) {
       console.error(`[Inject] Error sending ${q.questionID}: ${error.message}, retries left: ${retries}`);
       retries--;
       if (retries === 0) {
         console.error(`[Inject] Failed to send ${q.questionID} after retries`);
-        if (boxes[q.questionID]) {
-          boxes[q.questionID].element.textContent = `Ошибка: ${error.message}`;
-          localStorage.setItem(`boxText_${uid}_${q.questionID}`, boxes[q.questionID].element.textContent);
-        }
+        if (boxes[q.questionID]) boxes[q.questionID].element.textContent = `Ошибка: ${error.message}`;
       }
       await new Promise(resolve => setTimeout(resolve, 1000));
     }
   }
 }
 
+// Обработка кликов на вопросы и ответы
 function setupClickHandlers() {
   document.querySelectorAll(".qnum").forEach(qnum => {
-    qnum.removeEventListener("click", handleClick);
+    qnum.removeEventListener("click", handleClick); // Удаляем старые обработчики
     qnum.addEventListener("click", handleClick);
   });
   document.querySelectorAll(".answer").forEach(answer => {
     answer.removeEventListener("click", handleClick);
     answer.addEventListener("click", handleClick);
-  });
-}
-
+менно на вопрос или ответ
 function handleClick() {
   const num = getCurrentQuestionNumber();
   if (num) {
@@ -196,6 +185,7 @@ function handleClick() {
   }
 }
 
+// Обработка текущего вопроса
 async function handleQuestion(manualQuestionNumber = null) {
   let questionNumber = manualQuestionNumber || getCurrentQuestionNumber();
   if (!questionNumber || questionNumber < 1 || questionNumber > 10) {
@@ -220,50 +210,29 @@ async function handleQuestion(manualQuestionNumber = null) {
     box.style.display = "block";
   }
 
-  if (pollTimeout) {
-    clearTimeout(pollTimeout);
-    pollTimeout = null;
-    console.log(`[Inject] Cleared previous poll for ${currentQuestionId}`);
-  }
-
   async function pollAnswer() {
-    if (questionID !== currentQuestionId) {
-      console.log(`[Inject] Aborting poll for ${questionID} as current question is ${currentQuestionId}`);
-      return;
-    }
-
-    if (localStorage.getItem(`boxAnswer_${uid}_${questionID}`)) {
-      console.log(`[Inject] Answer for ${questionID} already saved locally`);
-      return;
-    }
-
     try {
       console.log(`[Inject] Polling answer for ${questionID}`);
       const res = await fetch(`${SERVER}/get-answer/${uid}/${questionID}`);
       const data = await res.json();
       if (!res.ok) throw new Error(`Server error: ${res.status}, ${data.message || ''}`);
-      if (data.answer && questionID === currentQuestionId) {
-        const answerText = `Ответ: ${data.answer}`;
-        boxes[questionID].element.textContent = answerText;
-        localStorage.setItem(`boxAnswer_${uid}_${questionID}`, data.answer);
-        localStorage.setItem(`boxText_${uid}_${questionID}`, answerText);
-        if (boxes[questionID].visible) boxes[questionID].element.style.display = "block";
+      if (data.answer) {
+        box.textContent = `Ответ: ${data.answer}`;
+        if (boxes[questionID].visible) box.style.display = "block";
         console.log(`[Inject] Answer for ${questionID}: ${data.answer}`);
       } else {
-        pollTimeout = setTimeout(pollAnswer, 2000);
+        setTimeout(pollAnswer, 2000);
       }
     } catch (error) {
-      if (questionID === currentQuestionId) {
-        boxes[questionID].element.textContent = `Ошибка: ${error.message}`;
-        localStorage.setItem(`boxText_${uid}_${questionID}`, boxes[questionID].element.textContent);
-        console.error(`[Inject] Error polling ${questionID}: ${error.message}`);
-        pollTimeout = setTimeout(pollAnswer, 2000);
-      }
+      box.textContent = `Ошибка: ${error.message}`;
+      console.error(`[Inject] Error polling ${questionID}: ${error.message}`);
+      setTimeout(pollAnswer, 2000);
     }
   }
   pollAnswer();
 }
 
+// Отслеживание изменений DOM
 const observer = new MutationObserver(() => {
   console.log("[Inject] DOM changed, checking question");
   handleQuestion();
@@ -275,16 +244,19 @@ observer.observe(document.body, {
   attributes: true,
 });
 
+// Первичная обработка
 console.log("[Inject] Initializing");
 setupClickHandlers();
 handleQuestion();
 
+// Ручной запуск
 window.manualSetQuestion = function(questionNumber) {
   console.log(`[Inject] Manually set question: ${questionNumber}`);
   sendQuestion(questionNumber);
   handleQuestion(questionNumber);
 };
 
+// Резервный запуск
 setTimeout(() => {
   if (!currentQuestionId) {
     console.log("[Inject] No question detected, forcing q1");
