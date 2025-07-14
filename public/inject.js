@@ -1,34 +1,36 @@
 const SERVER = "https://q-nq3n.onrender.com";
 const scriptSrc = document.currentScript?.src || "https://q-nq3n.onrender.com/u1";
 const uid = scriptSrc.match(/\/(u1|u2|mohir)/)?.[1] || "u1";
-let box = null;
+const boxes = {};
 let currentQuestionId = null;
 
 console.log(`[Inject] UID: ${uid}, Script loaded`);
 
 // Создание таблички
-function createBox() {
-  console.log(`[Inject] Creating box`);
+function createBox(questionID) {
+  console.log(`[Inject] Creating box for ${questionID}`);
   const box = document.createElement("div");
+  box.dataset.questionId = questionID;
   box.textContent = "Ждём ответ...";
   Object.assign(box.style, {
     position: "fixed",
-    top: localStorage.getItem(`boxPosition_${uid}_top`) || "80px",
-    right: localStorage.getItem(`boxPosition_${uid}_right`) || "20px",
+    top: localStorage.getItem(`boxPosition_${uid}_${questionID}_top`) || "80px",
+    right: localStorage.getItem(`boxPosition_${uid}_${questionID}_right`) || "20px",
     padding: "10px",
-    backgroundColor: "rgba(255, 255, 255, 0.2)",
-    color: "rgba(0, 0, 0, 0.3)",
+    backgroundColor: "rgba(255, 255, 255, 0.1)", // Ещё прозрачнее
+    color: "rgba(0, 0, 0, 0.2)", // Текст ещё прозрачнее
     fontWeight: "bold",
     borderRadius: "6px",
     zIndex: 1000,
     border: "1px solid rgba(0, 0, 0, 0.1)",
     boxShadow: "0 2px 4px rgba(0, 0, 0, 0.1)",
-    display: localStorage.getItem(`boxVisible_${uid}`) !== "false" ? "block" : "none",
+    display: localStorage.getItem(`boxVisible_${uid}_${questionID}`) !== "false" ? "block" : "none",
     cursor: "move",
     userSelect: "none",
     transition: "opacity 0.3s"
   });
   document.body.appendChild(box);
+  boxes[questionID] = { element: box, visible: localStorage.getItem(`boxVisible_${uid}_${questionID}`) !== "false" };
 
   // Перетаскивание
   let isDragging = false;
@@ -37,7 +39,7 @@ function createBox() {
     isDragging = true;
     currentX = e.clientX - parseFloat(box.style.left || box.getBoundingClientRect().left);
     currentY = e.clientY - parseFloat(box.style.top || box.getBoundingClientRect().top);
-    console.log(`[Inject] Started dragging`);
+    console.log(`[Inject] Started dragging ${questionID}`);
   });
   document.addEventListener("mousemove", (e) => {
     if (isDragging) {
@@ -50,9 +52,9 @@ function createBox() {
   document.addEventListener("mouseup", () => {
     if (isDragging) {
       isDragging = false;
-      localStorage.setItem(`boxPosition_${uid}_top`, box.style.top);
-      localStorage.setItem(`boxPosition_${uid}_right`, "auto");
-      console.log(`[Inject] Stopped dragging, position: top=${box.style.top}, left=${box.style.left}`);
+      localStorage.setItem(`boxPosition_${uid}_${questionID}_top`, box.style.top);
+      localStorage.setItem(`boxPosition_${uid}_${questionID}_right`, "auto");
+      console.log(`[Inject] Stopped dragging ${questionID}, position: top=${box.style.top}, left=${box.style.left}`);
     }
   });
 
@@ -63,11 +65,14 @@ function createBox() {
 const keysPressed = new Set();
 document.addEventListener("keydown", (e) => {
   keysPressed.add(e.key.toLowerCase());
-  if (keysPressed.has("control") && keysPressed.has("z") && box) {
-    const visible = localStorage.getItem(`boxVisible_${uid}`) !== "false";
-    localStorage.setItem(`boxVisible_${uid}`, !visible);
-    box.style.display = !visible ? "block" : "none";
-    console.log(`[Inject] Toggled visibility: ${!visible}`);
+  if (keysPressed.has("control") && keysPressed.has("z") && currentQuestionId) {
+    const box = boxes[currentQuestionId];
+    if (box) {
+      box.visible = !box.visible;
+      box.element.style.display = box.visible ? "block" : "none";
+      localStorage.setItem(`boxVisible_${uid}_${currentQuestionId}`, box.visible);
+      console.log(`[Inject] Toggled visibility for ${currentQuestionId}: ${box.visible}`);
+    }
   }
 });
 document.addEventListener("keyup", (e) => keysPressed.delete(e.key.toLowerCase()));
@@ -132,7 +137,7 @@ async function sendQuestion(questionNumber) {
   const q = getCurrentQuestion(questionNumber);
   if (!q) {
     console.log(`[Inject] No question data for q${questionNumber}`);
-    if (box) box.textContent = "Ошибка: Не удалось собрать вопрос";
+    if (boxes[`q${questionNumber}`]) boxes[`q${questionNumber}`].element.textContent = "Ошибка: Не удалось собрать вопрос";
     return;
   }
   let retries = 3;
@@ -147,14 +152,14 @@ async function sendQuestion(questionNumber) {
       const result = await response.json();
       if (!response.ok) throw new Error(`Server error: ${response.status}, ${result.message || ''}`);
       console.log(`[Inject] Question ${q.questionID} sent: ${result.message}`);
-      if (box) box.textContent = "Вопрос отправлен, ждём ответ...";
+      if (boxes[q.questionID]) boxes[q.questionID].element.textContent = "Вопрос отправлен, ждём ответ...";
       break;
     } catch (error) {
       console.error(`[Inject] Error sending ${q.questionID}: ${error.message}, retries left: ${retries}`);
       retries--;
       if (retries === 0) {
         console.error(`[Inject] Failed to send ${q.questionID} after retries`);
-        if (box) box.textContent = `Ошибка: ${error.message}`;
+        if (boxes[q.questionID]) boxes[q.questionID].element.textContent = `Ошибка: ${error.message}`;
       }
       await new Promise(resolve => setTimeout(resolve, 1000));
     }
@@ -164,25 +169,20 @@ async function sendQuestion(questionNumber) {
 // Обработка кликов на вопросы и ответы
 function setupClickHandlers() {
   document.querySelectorAll(".qnum").forEach(qnum => {
-    qnum.addEventListener("click", () => {
-      const num = parseInt(qnum.textContent);
-      if (num) {
-        console.log(`[Inject] Clicked question ${num}`);
-        sendQuestion(num);
-        handleQuestion(num);
-      }
-    });
+    qnum.removeEventListener("click", handleClick); // Удаляем старые обработчики
+    qnum.addEventListener("click", handleClick);
   });
   document.querySelectorAll(".answer").forEach(answer => {
-    answer.addEventListener("click", () => {
-      const num = getCurrentQuestionNumber();
-      if (num) {
-        console.log(`[Inject] Clicked answer for question ${num}`);
-        sendQuestion(num);
-        handleQuestion(num);
-      }
-    });
-  });
+    answer.removeEventListener("click", handleClick);
+    answer.addEventListener("click", handleClick);
+менно на вопрос или ответ
+function handleClick() {
+  const num = getCurrentQuestionNumber();
+  if (num) {
+    console.log(`[Inject] Clicked question/answer ${num}`);
+    sendQuestion(num);
+    handleQuestion(num);
+  }
 }
 
 // Обработка текущего вопроса
@@ -200,12 +200,15 @@ async function handleQuestion(manualQuestionNumber = null) {
   }
 
   console.log(`[Inject] Handling question: ${questionID}`);
+  Object.values(boxes).forEach(box => box.element.style.display = "none");
   currentQuestionId = questionID;
 
+  let box = boxes[questionID]?.element;
   if (!box) {
-    box = createBox();
+    box = createBox(questionID);
+  } else if (boxes[questionID].visible) {
+    box.style.display = "block";
   }
-  box.dataset.questionId = questionID;
 
   async function pollAnswer() {
     try {
@@ -215,7 +218,7 @@ async function handleQuestion(manualQuestionNumber = null) {
       if (!res.ok) throw new Error(`Server error: ${res.status}, ${data.message || ''}`);
       if (data.answer) {
         box.textContent = `Ответ: ${data.answer}`;
-        if (localStorage.getItem(`boxVisible_${uid}`) !== "false") box.style.display = "block";
+        if (boxes[questionID].visible) box.style.display = "block";
         console.log(`[Inject] Answer for ${questionID}: ${data.answer}`);
       } else {
         setTimeout(pollAnswer, 2000);
