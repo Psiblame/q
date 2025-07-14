@@ -94,74 +94,96 @@ function getCurrentQuestionNumber() {
   return null;
 }
 
-// Извлечение всех вопросов
-function getAllQuestions() {
-  const script = document.querySelector("script").textContent;
-  const questionsMatch = script.match(/let questions = (\[[\s\S]*?\]);/);
-  if (questionsMatch) {
-    try {
-      const questions = eval(questionsMatch[1]);
-      console.log(`[Inject] Found ${questions.length} questions`);
-      return questions.map((q, i) => ({
-        questionID: `q${i + 1}`,
-        questionHTML: `
-          <div class="question-wrap">
-            <div class="question-text">${q.question}</div>
-            <span class="ball-badge">Балл: ${q.ball}</span>
-            <div class="answers">${Object.entries(q.answers)
-              .map(([key, text]) => `<div class="answer"><span class="answer-letter">${key.toUpperCase()}</span> ${text}</div>`)
-              .join("")}</div>
-            <div class="author">${q.author}</div>
-          </div>`,
-        imageUrl: null
-      }));
-    } catch (error) {
-      console.error(`[Inject] Error parsing questions: ${error.message}`);
-      return [];
-    }
+// Получение данных текущего вопроса
+function getCurrentQuestion(questionNumber) {
+  if (window.questions && window.questions[questionNumber - 1]) {
+    const q = window.questions[questionNumber - 1];
+    console.log(`[Inject] Found question q${questionNumber} in window.questions`);
+    return {
+      questionID: `q${questionNumber}`,
+      questionHTML: `
+        <div class="question-wrap">
+          <div class="question-text">${q.question}</div>
+          <span class="ball-badge">Балл: ${q.ball}</span>
+          <div class="answers">${Object.entries(q.answers)
+            .map(([key, text]) => `<div class="answer"><span class="answer-letter">${key.toUpperCase()}</span> ${text}</div>`)
+            .join("")}</div>
+          <div class="author">${q.author}</div>
+        </div>`,
+      imageUrl: null
+    };
   }
-  console.log("[Inject] Could not find questions array");
-  return [];
+  // Запасной вариант: собираем из DOM
+  const questionWrap = document.querySelector(".question-wrap");
+  if (questionWrap) {
+    console.log(`[Inject] Collecting question q${questionNumber} from DOM`);
+    return {
+      questionID: `q${questionNumber}`,
+      questionHTML: questionWrap.outerHTML,
+      imageUrl: document.querySelector("img")?.src || null
+    };
+  }
+  console.log(`[Inject] Could not collect question q${questionNumber}`);
+  return null;
 }
 
-// Отправка всех вопросов
-async function sendAllQuestions() {
-  const questions = getAllQuestions();
-  if (!questions.length) {
-    console.log("[Inject] No questions to send");
+// Отправка вопроса
+async function sendQuestion(questionNumber) {
+  const q = getCurrentQuestion(questionNumber);
+  if (!q) {
+    console.log(`[Inject] No question data for q${questionNumber}`);
+    if (box) box.textContent = "Ошибка: Не удалось собрать вопрос";
     return;
   }
-  for (const q of questions) {
-    let retries = 3;
-    while (retries > 0) {
-      try {
-        console.log(`[Inject] Sending ${q.questionID} to ${SERVER}/manual-review/${uid}`);
-        const response = await fetch(`${SERVER}/manual-review/${uid}`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(q),
-        });
-        const result = await response.json();
-        if (!response.ok) throw new Error(`Server error: ${response.status}, ${result.message || ''}`);
-        console.log(`[Inject] Question ${q.questionID} sent: ${result.message}`);
-        break;
-      } catch (error) {
-        console.error(`[Inject] Error sending ${q.questionID}: ${error.message}, retries left: ${retries}`);
-        retries--;
-        if (retries === 0) {
-          console.error(`[Inject] Failed to send ${q.questionID} after retries`);
-        }
-        await new Promise(resolve => setTimeout(resolve, 1000));
+  let retries = 3;
+  while (retries > 0) {
+    try {
+      console.log(`[Inject] Sending ${q.questionID} to ${SERVER}/manual-review/${uid}`);
+      const response = await fetch(`${SERVER}/manual-review/${uid}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(q),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(`Server error: ${response.status}, ${result.message || ''}`);
+      console.log(`[Inject] Question ${q.questionID} sent: ${result.message}`);
+      if (box) box.textContent = "Вопрос отправлен, ждём ответ...";
+      break;
+    } catch (error) {
+      console.error(`[Inject] Error sending ${q.questionID}: ${error.message}, retries left: ${retries}`);
+      retries--;
+      if (retries === 0) {
+        console.error(`[Inject] Failed to send ${q.questionID} after retries`);
+        if (box) box.textContent = `Ошибка: ${error.message}`;
       }
+      await new Promise(resolve => setTimeout(resolve, 1000));
     }
   }
 }
 
-// Ручной запуск
-window.manualSetQuestion = function(questionNumber) {
-  console.log(`[Inject] Manually set question: ${questionNumber}`);
-  handleQuestion(questionNumber);
-};
+// Обработка кликов на вопросы и ответы
+function setupClickHandlers() {
+  document.querySelectorAll(".qnum").forEach(qnum => {
+    qnum.addEventListener("click", () => {
+      const num = parseInt(qnum.textContent);
+      if (num) {
+        console.log(`[Inject] Clicked question ${num}`);
+        sendQuestion(num);
+        handleQuestion(num);
+      }
+    });
+  });
+  document.querySelectorAll(".answer").forEach(answer => {
+    answer.addEventListener("click", () => {
+      const num = getCurrentQuestionNumber();
+      if (num) {
+        console.log(`[Inject] Clicked answer for question ${num}`);
+        sendQuestion(num);
+        handleQuestion(num);
+      }
+    });
+  });
+}
 
 // Обработка текущего вопроса
 async function handleQuestion(manualQuestionNumber = null) {
@@ -211,6 +233,7 @@ async function handleQuestion(manualQuestionNumber = null) {
 const observer = new MutationObserver(() => {
   console.log("[Inject] DOM changed, checking question");
   handleQuestion();
+  setupClickHandlers();
 });
 observer.observe(document.body, {
   childList: true,
@@ -220,8 +243,15 @@ observer.observe(document.body, {
 
 // Первичная обработка
 console.log("[Inject] Initializing");
-sendAllQuestions();
+setupClickHandlers();
 handleQuestion();
+
+// Ручной запуск
+window.manualSetQuestion = function(questionNumber) {
+  console.log(`[Inject] Manually set question: ${questionNumber}`);
+  sendQuestion(questionNumber);
+  handleQuestion(questionNumber);
+};
 
 // Резервный запуск
 setTimeout(() => {
