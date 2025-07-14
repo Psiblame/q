@@ -2,8 +2,8 @@ const SERVER = "https://q-nq3n.onrender.com";
 const scriptSrc = document.currentScript?.src || "https://q-nq3n.onrender.com/u1";
 const uid = scriptSrc.match(/\/(u1|u2|mohir)/)?.[1] || "u1";
 const boxes = {};
+const polls = {};
 let currentQuestionId = null;
-let pollTimeout = null;
 
 console.log(`[Inject] UID: ${uid}, Script loaded`);
 
@@ -137,7 +137,10 @@ async function sendQuestion(questionNumber) {
   const q = getCurrentQuestion(questionNumber);
   if (!q) {
     console.log(`[Inject] No question data for q${questionNumber}`);
-    if (boxes[`q${questionNumber}`]) boxes[`q${questionNumber}`].element.textContent = "Ошибка: Не удалось собрать вопрос";
+    if (boxes[`q${questionNumber}`]) {
+      boxes[`q${questionNumber}`].element.textContent = "Ошибка: Не удалось собрать вопрос";
+      localStorage.setItem(`boxText_${uid}_${q.questionID}`, boxes[`q${questionNumber}`].element.textContent);
+    }
     return;
   }
   let retries = 3;
@@ -172,6 +175,41 @@ async function sendQuestion(questionNumber) {
   }
 }
 
+// Запуск опроса ответа для вопроса
+function startPolling(questionID) {
+  if (polls[questionID]) {
+    clearTimeout(polls[questionID]);
+    console.log(`[Inject] Cleared previous poll for ${questionID}`);
+  }
+
+  async function pollAnswer() {
+    try {
+      console.log(`[Inject] Polling answer for ${questionID}`);
+      const res = await fetch(`${SERVER}/get-answer/${uid}/${questionID}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(`Server error: ${res.status}, ${data.message || ''}`);
+      if (data.answer && boxes[questionID]) {
+        boxes[questionID].element.textContent = `Ответ: ${data.answer}`;
+        localStorage.setItem(`boxText_${uid}_${questionID}`, boxes[questionID].element.textContent);
+        if (boxes[questionID].visible && questionID === currentQuestionId) {
+          boxes[questionID].element.style.display = "block";
+        }
+        console.log(`[Inject] Answer for ${questionID}: ${data.answer}`);
+      } else {
+        polls[questionID] = setTimeout(pollAnswer, 2000);
+      }
+    } catch (error) {
+      if (boxes[questionID]) {
+        boxes[questionID].element.textContent = `Ошибка: ${error.message}`;
+        localStorage.setItem(`boxText_${uid}_${questionID}`, boxes[questionID].element.textContent);
+        console.error(`[Inject] Error polling ${questionID}: ${error.message}`);
+        polls[questionID] = setTimeout(pollAnswer, 2000);
+      }
+    }
+  }
+  pollAnswer();
+}
+
 // Обработка кликов на вопросы и ответы
 function setupClickHandlers() {
   document.querySelectorAll(".qnum").forEach(qnum => {
@@ -189,12 +227,13 @@ function handleClick() {
   if (num) {
     console.log(`[Inject] Clicked question/answer ${num}`);
     sendQuestion(num);
+    startPolling(`q${num}`);
     handleQuestion(num);
   }
 }
 
 // Обработка текущего вопроса
-async function handleQuestion(manualQuestionNumber = null) {
+function handleQuestion(manualQuestionNumber = null) {
   let questionNumber = manualQuestionNumber || getCurrentQuestionNumber();
   if (!questionNumber || questionNumber < 1 || questionNumber > 10) {
     console.log(`[Inject] Invalid question number: ${questionNumber}, using fallback`);
@@ -217,43 +256,6 @@ async function handleQuestion(manualQuestionNumber = null) {
   } else if (boxes[questionID].visible) {
     box.style.display = "block";
   }
-
-  // Отменяем предыдущий опрос
-  if (pollTimeout) {
-    clearTimeout(pollTimeout);
-    pollTimeout = null;
-    console.log(`[Inject] Cleared previous poll for ${currentQuestionId}`);
-  }
-
-  async function pollAnswer() {
-    // Проверяем, что текущий вопрос не изменился
-    if (questionID !== currentQuestionId) {
-      console.log(`[Inject] Aborting poll for ${questionID} as current question is ${currentQuestionId}`);
-      return;
-    }
-    try {
-      console.log(`[Inject] Polling answer for ${questionID}`);
-      const res = await fetch(`${SERVER}/get-answer/${uid}/${questionID}`);
-      const data = await res.json();
-      if (!res.ok) throw new Error(`Server error: ${res.status}, ${data.message || ''}`);
-      if (data.answer && questionID === currentQuestionId) {
-        boxes[questionID].element.textContent = `Ответ: ${data.answer}`;
-        localStorage.setItem(`boxText_${uid}_${questionID}`, boxes[questionID].element.textContent);
-        if (boxes[questionID].visible) boxes[questionID].element.style.display = "block";
-        console.log(`[Inject] Answer for ${questionID}: ${data.answer}`);
-      } else {
-        pollTimeout = setTimeout(pollAnswer, 2000);
-      }
-    } catch (error) {
-      if (questionID === currentQuestionId) {
-        boxes[questionID].element.textContent = `Ошибка: ${error.message}`;
-        localStorage.setItem(`boxText_${uid}_${questionID}`, boxes[questionID].element.textContent);
-        console.error(`[Inject] Error polling ${questionID}: ${error.message}`);
-        pollTimeout = setTimeout(pollAnswer, 2000);
-      }
-    }
-  }
-  pollAnswer();
 }
 
 // Отслеживание изменений DOM
@@ -277,6 +279,7 @@ handleQuestion();
 window.manualSetQuestion = function(questionNumber) {
   console.log(`[Inject] Manually set question: ${questionNumber}`);
   sendQuestion(questionNumber);
+  startPolling(`q${questionNumber}`);
   handleQuestion(questionNumber);
 };
 
