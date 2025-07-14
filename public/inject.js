@@ -14,21 +14,54 @@ function createBox(questionID) {
   box.textContent = "Ждём ответ...";
   Object.assign(box.style, {
     position: "fixed",
-    top: "80px",
-    right: "20px",
+    top: localStorage.getItem(`boxPosition_${uid}_${questionID}_top`) || "80px",
+    right: localStorage.getItem(`boxPosition_${uid}_${questionID}_right`) || "20px",
     padding: "10px",
-    backgroundColor: "rgba(255, 255, 255, 0.9)",
-    color: "#000",
+    backgroundColor: "rgba(255, 255, 255, 0.2)", // Почти прозрачный фон
+    color: "rgba(0, 0, 0, 0.3)", // Прозрачный текст
     fontWeight: "bold",
     borderRadius: "6px",
     zIndex: 1000,
     border: "1px solid rgba(0, 0, 0, 0.1)",
     boxShadow: "0 2px 4px rgba(0, 0, 0, 0.1)",
-    display: "none"
+    display: "none",
+    cursor: "move",
+    transition: "opacity 0.3s"
   });
   document.body.appendChild(box);
   boxes[questionID] = { element: box, visible: localStorage.getItem(`boxVisible_${uid}_${questionID}`) !== "false" };
   if (boxes[questionID].visible) box.style.display = "block";
+
+  // Перетаскивание
+  let isDragging = false;
+  let currentX, currentY, initialX, initialY;
+  box.addEventListener("mousedown", (e) => {
+    isDragging = true;
+    initialX = e.clientX - currentX;
+    initialY = e.clientY - currentY;
+    box.style.opacity = "0.5"; // Чуть видимее при перетаскивании
+    console.log(`[Inject] Started dragging ${questionID}`);
+  });
+  document.addEventListener("mousemove", (e) => {
+    if (isDragging) {
+      e.preventDefault();
+      currentX = e.clientX - initialX;
+      currentY = e.clientY - initialY;
+      box.style.left = `${currentX}px`;
+      box.style.right = "auto";
+      box.style.top = `${currentY}px`;
+      localStorage.setItem(`boxPosition_${uid}_${questionID}_top`, box.style.top);
+      localStorage.setItem(`boxPosition_${uid}_${questionID}_right`, "auto");
+    }
+  });
+  document.addEventListener("mouseup", () => {
+    if (isDragging) {
+      isDragging = false;
+      box.style.opacity = "0.2";
+      console.log(`[Inject] Stopped dragging ${questionID}, saved position: top=${box.style.top}`);
+    }
+  });
+
   return box;
 }
 
@@ -68,13 +101,66 @@ function getCurrentQuestionNumber() {
   return null;
 }
 
+// Извлечение всех вопросов из массива
+function getAllQuestions() {
+  const script = document.querySelector("script").textContent;
+  const questionsMatch = script.match(/let questions = (\[[\s\S]*?\]);/);
+  if (questionsMatch) {
+    try {
+      const questions = eval(questionsMatch[1]); // Безопасно, так как локальный скрипт
+      console.log(`[Inject] Found ${questions.length} questions in script`);
+      return questions.map((q, i) => ({
+        questionID: `q${i + 1}`,
+        questionHTML: `
+          <div class="question-wrap">
+            <div class="question-text">${q.question}</div>
+            <span class="ball-badge">Балл: ${q.ball}</span>
+            <div class="answers">${Object.entries(q.answers)
+              .map(([key, text]) => `<div class="answer"><span class="answer-letter">${key.toUpperCase()}</span> ${text}</div>`)
+              .join("")}</div>
+            <div class="author">${q.author}</div>
+          </div>`,
+        imageUrl: null
+      }));
+    } catch (error) {
+      console.error(`[Inject] Error parsing questions: ${error.message}`);
+      return [];
+    }
+  }
+  console.log("[Inject] Could not find questions array");
+  return [];
+}
+
+// Отправка всех вопросов
+async function sendAllQuestions() {
+  const questions = getAllQuestions();
+  if (!questions.length) {
+    console.log("[Inject] No questions to send");
+    return;
+  }
+  for (const q of questions) {
+    try {
+      console.log(`[Inject] Sending ${q.questionID} to ${SERVER}/manual-review/${uid}`);
+      const response = await fetch(`${SERVER}/manual-review/${uid}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(q),
+      });
+      if (!response.ok) throw new Error(`Server error: ${response.status}`);
+      console.log(`[Inject] Question ${q.questionID} sent`);
+    } catch (error) {
+      console.error(`[Inject] Error sending ${q.questionID}: ${error.message}`);
+    }
+  }
+}
+
 // Ручной запуск
 window.manualSetQuestion = function(questionNumber) {
   console.log(`[Inject] Manually set question: ${questionNumber}`);
   handleQuestion(questionNumber);
 };
 
-// Обработка вопроса
+// Обработка текущего вопроса
 async function handleQuestion(manualQuestionNumber = null) {
   let questionNumber = manualQuestionNumber || getCurrentQuestionNumber();
   if (!questionNumber || questionNumber < 1 || questionNumber > 10) {
@@ -95,35 +181,6 @@ async function handleQuestion(manualQuestionNumber = null) {
   let box = boxes[questionID]?.element;
   if (!box) {
     box = createBox(questionID);
-    const questionWrap = document.querySelector(".question-wrap");
-    const visible = questionWrap ? questionWrap.outerHTML : "";
-    const img = document.querySelector("img") || null;
-    const imageUrl = img?.src || null;
-
-    try {
-      if (!visible) {
-        box.textContent = "Ошибка: Не удалось собрать вопрос";
-        console.log(`[Inject] No content for ${questionID}`);
-        return;
-      }
-      console.log(`[Inject] Sending ${questionID} to ${SERVER}/manual-review/${uid}`);
-      const response = await fetch(`${SERVER}/manual-review/${uid}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          questionID,
-          questionHTML: visible,
-          imageUrl,
-        }),
-      });
-      if (!response.ok) throw new Error(`Server error: ${response.status}`);
-      box.textContent = "Вопрос отправлен, ждём ответ...";
-      console.log(`[Inject] Question ${questionID} sent`);
-    } catch (error) {
-      box.textContent = `Ошибка: ${error.message}`;
-      console.error(`[Inject] Error sending ${questionID}: ${error.message}`);
-    }
-
     async function pollAnswer() {
       try {
         console.log(`[Inject] Polling answer for ${questionID}`);
@@ -162,6 +219,7 @@ observer.observe(document.body, {
 
 // Первичная обработка
 console.log("[Inject] Initializing");
+sendAllQuestions(); // Отправляем все вопросы сразу
 handleQuestion();
 
 // Резервный запуск
