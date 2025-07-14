@@ -137,6 +137,13 @@ async function sendQuestion(questionNumber) {
     if (boxes[`q${questionNumber}`]) boxes[`q${questionNumber}`].element.textContent = "Ошибка: Не удалось собрать вопрос";
     return;
   }
+
+  // 🛡 Пропуск, если уже есть сохранённый ответ
+  if (localStorage.getItem(`boxAnswer_${uid}_${q.questionID}`)) {
+    console.log(`[Inject] Answer already saved for ${q.questionID}, skipping send`);
+    return;
+  }
+
   let retries = 3;
   while (retries > 0) {
     try {
@@ -149,7 +156,7 @@ async function sendQuestion(questionNumber) {
       const result = await response.json();
       if (!response.ok) throw new Error(`Server error: ${response.status}, ${result.message || ''}`);
       console.log(`[Inject] Question ${q.questionID} sent: ${result.message}`);
-      if (boxes[q.questionID]) {
+      if (boxes[q.questionID] && !localStorage.getItem(`boxAnswer_${uid}_${q.questionID}`)) {
         boxes[q.questionID].element.textContent = "Вопрос отправлен, ждём ответ...";
         localStorage.setItem(`boxText_${uid}_${q.questionID}`, boxes[q.questionID].element.textContent);
       }
