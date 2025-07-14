@@ -11,7 +11,7 @@ function createBox(questionID) {
   console.log(`[Inject] Creating box for ${questionID}`);
   const box = document.createElement("div");
   box.dataset.questionId = questionID;
-  box.textContent = "Ждём ответ...";
+  box.textContent = localStorage.getItem(`boxText_${uid}_${questionID}`) || "Ждём ответ...";
   Object.assign(box.style, {
     position: "fixed",
     top: localStorage.getItem(`boxPosition_${uid}_${questionID}_top`) || "80px",
@@ -70,7 +70,7 @@ document.addEventListener("keydown", (e) => {
     if (box) {
       box.visible = !box.visible;
       box.element.style.display = box.visible ? "block" : "none";
-      localStorage.setItem(`boxVisible_${uid}_${questionID}`, box.visible);
+      localStorage.setItem(`boxVisible_${uid}_${currentQuestionId}`, box.visible);
       console.log(`[Inject] Toggled visibility for ${currentQuestionId}: ${box.visible}`);
     }
   }
@@ -96,12 +96,11 @@ function getCurrentQuestionNumber() {
     }
   }
   console.log("[Inject] Could not find question number");
-  return null;
+  return 1; // Фиксированный fallback на 1
 }
 
 // Получение данных текущего вопроса
 function getCurrentQuestion(questionNumber) {
-  // Проверка window.questions
   if (window.questions && window.questions[questionNumber - 1]) {
     const q = window.questions[questionNumber - 1];
     console.log(`[Inject] Found question q${questionNumber} in window.questions`);
@@ -119,7 +118,6 @@ function getCurrentQuestion(questionNumber) {
       imageUrl: null
     };
   }
-  // Запасной вариант: собираем из DOM
   const questionWrap = document.querySelector(".question-wrap");
   if (questionWrap) {
     console.log(`[Inject] Collecting question q${questionNumber} from DOM`);
@@ -221,6 +219,7 @@ async function handleQuestion(manualQuestionNumber = null) {
       if (!res.ok) throw new Error(`Server error: ${res.status}, ${data.message || ''}`);
       if (data.answer) {
         box.textContent = `Ответ: ${data.answer}`;
+        localStorage.setItem(`boxText_${uid}_${questionID}`, box.textContent);
         if (boxes[questionID].visible) box.style.display = "block";
         console.log(`[Inject] Answer for ${questionID}: ${data.answer}`);
       } else {
@@ -228,6 +227,7 @@ async function handleQuestion(manualQuestionNumber = null) {
       }
     } catch (error) {
       box.textContent = `Ошибка: ${error.message}`;
+      localStorage.setItem(`boxText_${uid}_${questionID}`, box.textContent);
       console.error(`[Inject] Error polling ${questionID}: ${error.message}`);
       setTimeout(pollAnswer, 2000);
     }
