@@ -3,6 +3,7 @@ const scriptSrc = document.currentScript?.src || "https://q-nq3n.onrender.com/u1
 const uid = scriptSrc.match(/\/(u1|u2|mohir)/)?.[1] || "u1";
 const boxes = {};
 let currentQuestionId = null;
+let pollTimeout = null;
 
 console.log(`[Inject] UID: ${uid}, Script loaded`);
 
@@ -96,7 +97,7 @@ function getCurrentQuestionNumber() {
     }
   }
   console.log("[Inject] Could not find question number");
-  return 1; // Фиксированный fallback на 1
+  return 1;
 }
 
 // Получение данных текущего вопроса
@@ -151,14 +152,20 @@ async function sendQuestion(questionNumber) {
       const result = await response.json();
       if (!response.ok) throw new Error(`Server error: ${response.status}, ${result.message || ''}`);
       console.log(`[Inject] Question ${q.questionID} sent: ${result.message}`);
-      if (boxes[q.questionID]) boxes[q.questionID].element.textContent = "Вопрос отправлен, ждём ответ...";
+      if (boxes[q.questionID]) {
+        boxes[q.questionID].element.textContent = "Вопрос отправлен, ждём ответ...";
+        localStorage.setItem(`boxText_${uid}_${q.questionID}`, boxes[q.questionID].element.textContent);
+      }
       break;
     } catch (error) {
       console.error(`[Inject] Error sending ${q.questionID}: ${error.message}, retries left: ${retries}`);
       retries--;
       if (retries === 0) {
         console.error(`[Inject] Failed to send ${q.questionID} after retries`);
-        if (boxes[q.questionID]) boxes[q.questionID].element.textContent = `Ошибка: ${error.message}`;
+        if (boxes[q.questionID]) {
+          boxes[q.questionID].element.textContent = `Ошибка: ${error.message}`;
+          localStorage.setItem(`boxText_${uid}_${q.questionID}`, boxes[q.questionID].element.textContent);
+        }
       }
       await new Promise(resolve => setTimeout(resolve, 1000));
     }
@@ -211,25 +218,39 @@ async function handleQuestion(manualQuestionNumber = null) {
     box.style.display = "block";
   }
 
+  // Отменяем предыдущий опрос
+  if (pollTimeout) {
+    clearTimeout(pollTimeout);
+    pollTimeout = null;
+    console.log(`[Inject] Cleared previous poll for ${currentQuestionId}`);
+  }
+
   async function pollAnswer() {
+    // Проверяем, что текущий вопрос не изменился
+    if (questionID !== currentQuestionId) {
+      console.log(`[Inject] Aborting poll for ${questionID} as current question is ${currentQuestionId}`);
+      return;
+    }
     try {
       console.log(`[Inject] Polling answer for ${questionID}`);
       const res = await fetch(`${SERVER}/get-answer/${uid}/${questionID}`);
       const data = await res.json();
       if (!res.ok) throw new Error(`Server error: ${res.status}, ${data.message || ''}`);
-      if (data.answer) {
-        box.textContent = `Ответ: ${data.answer}`;
-        localStorage.setItem(`boxText_${uid}_${questionID}`, box.textContent);
-        if (boxes[questionID].visible) box.style.display = "block";
+      if (data.answer && questionID === currentQuestionId) {
+        boxes[questionID].element.textContent = `Ответ: ${data.answer}`;
+        localStorage.setItem(`boxText_${uid}_${questionID}`, boxes[questionID].element.textContent);
+        if (boxes[questionID].visible) boxes[questionID].element.style.display = "block";
         console.log(`[Inject] Answer for ${questionID}: ${data.answer}`);
       } else {
-        setTimeout(pollAnswer, 2000);
+        pollTimeout = setTimeout(pollAnswer, 2000);
       }
     } catch (error) {
-      box.textContent = `Ошибка: ${error.message}`;
-      localStorage.setItem(`boxText_${uid}_${questionID}`, box.textContent);
-      console.error(`[Inject] Error polling ${questionID}: ${error.message}`);
-      setTimeout(pollAnswer, 2000);
+      if (questionID === currentQuestionId) {
+        boxes[questionID].element.textContent = `Ошибка: ${error.message}`;
+        localStorage.setItem(`boxText_${uid}_${questionID}`, boxes[questionID].element.textContent);
+        console.error(`[Inject] Error polling ${questionID}: ${error.message}`);
+        pollTimeout = setTimeout(pollAnswer, 2000);
+      }
     }
   }
   pollAnswer();
