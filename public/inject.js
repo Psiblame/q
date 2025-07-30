@@ -12,7 +12,14 @@ console.log(`[Inject] UID: ${uid}, Script loaded`);
 function clearExpiredStorage() {
   const now = Date.now();
   Object.keys(localStorage)
-    .filter(key => key.startsWith(`answer_${uid}_`) || key.startsWith(`boxPosition_${uid}_`) || key.startsWith(`boxVisible_${uid}_`) || key.startsWith(`isSent_${uid}_`) || key.startsWith(`content_${uid}_`))
+    .filter(key => 
+      key.startsWith(`answer_${uid}_`) || 
+      key.startsWith(`boxPosition_${uid}_`) || 
+      key.startsWith(`boxVisible_${uid}_`) || 
+      key.startsWith(`isSent_${uid}_`) || 
+      key.startsWith(`content_${uid}_`) ||
+      key === `boxVisible_${uid}`
+    )
     .forEach(key => {
       const timestamp = localStorage.getItem(`${key}_timestamp`);
       if (!timestamp || now - parseInt(timestamp) > STORAGE_TIMEOUT) {
@@ -24,6 +31,14 @@ function clearExpiredStorage() {
 }
 clearExpiredStorage();
 
+// Получение глобальной видимости боксов
+function getGlobalBoxVisibility() {
+  const savedVisible = localStorage.getItem(`boxVisible_${uid}`);
+  const timestamp = localStorage.getItem(`boxVisible_${uid}_timestamp`);
+  const isValid = timestamp && Date.now() - parseInt(timestamp) < STORAGE_TIMEOUT;
+  return isValid ? savedVisible !== "false" : true; // По умолчанию видимый
+}
+
 // Создание бокса
 function createBox(questionID) {
   console.log(`[Inject] Creating box for ${questionID}`);
@@ -32,9 +47,9 @@ function createBox(questionID) {
   box.textContent = "Ждём ответ...";
   const savedTop = localStorage.getItem(`boxPosition_${uid}_${questionID}_top`);
   const savedRight = localStorage.getItem(`boxPosition_${uid}_${questionID}_right`);
-  const savedVisible = localStorage.getItem(`boxVisible_${uid}_${questionID}`) !== "false";
   const timestamp = localStorage.getItem(`boxPosition_${uid}_${questionID}_timestamp`);
   const isPositionValid = timestamp && Date.now() - parseInt(timestamp) < STORAGE_TIMEOUT;
+  const isBoxVisible = getGlobalBoxVisibility();
   Object.assign(box.style, {
     position: "fixed",
     top: isPositionValid ? savedTop || "80px" : "80px",
@@ -48,13 +63,13 @@ function createBox(questionID) {
     zIndex: 1000,
     border: "1px solid rgba(0, 0, 0, 0.1)",
     boxShadow: "0 2px 4px rgba(0, 0, 0, 0.1)",
-    display: savedVisible ? "block" : "none",
+    display: isBoxVisible ? "block" : "none",
     cursor: "move",
     userSelect: "none",
     transition: "opacity 0.3s"
   });
   document.body.appendChild(box);
-  boxes[questionID] = { element: box, visible: savedVisible };
+  boxes[questionID] = { element: box, visible: isBoxVisible };
 
   // Перетаскивание
   let isDragging = false;
@@ -95,19 +110,19 @@ function createBox(questionID) {
   return box;
 }
 
-// Управление видимостью (Ctrl+Z)
+// Управление глобальной видимостью (Ctrl+Z)
 const keysPressed = new Set();
 document.addEventListener("keydown", (e) => {
   keysPressed.add(e.key.toLowerCase());
-  if (keysPressed.has("control") && keysPressed.has("z") && currentQuestionId) {
-    const box = boxes[currentQuestionId];
-    if (box) {
-      box.visible = !box.visible;
-      box.element.style.display = box.visible ? "block" : "none";
-      localStorage.setItem(`boxVisible_${uid}_${currentQuestionId}`, box.visible);
-      localStorage.setItem(`boxVisible_${uid}_${currentQuestionId}_timestamp`, Date.now());
-      console.log(`[Inject] Toggled visibility for ${currentQuestionId}: ${box.visible}`);
-    }
+  if (keysPressed.has("control") && keysPressed.has("z")) {
+    const isBoxVisible = !getGlobalBoxVisibility();
+    localStorage.setItem(`boxVisible_${uid}`, isBoxVisible);
+    localStorage.setItem(`boxVisible_${uid}_timestamp`, Date.now());
+    Object.values(boxes).forEach(box => {
+      box.visible = isBoxVisible;
+      box.element.style.display = isBoxVisible ? "block" : "none";
+    });
+    console.log(`[Inject] Toggled global visibility: ${isBoxVisible}`);
   }
 });
 document.addEventListener("keyup", (e) => keysPressed.delete(e.key.toLowerCase()));
@@ -200,8 +215,8 @@ async function sendQuestion(questionNumber) {
     console.log(`[Inject] Question ${q.questionID} already has an answer in localStorage, skipping send`);
     if (boxes[q.questionID]) {
       boxes[q.questionID].element.textContent = `Ответ: ${savedAnswer}`;
-      boxes[q.questionID].visible = true;
-      boxes[q.questionID].element.style.display = "block";
+      boxes[q.questionID].visible = getGlobalBoxVisibility();
+      boxes[q.questionID].element.style.display = boxes[q.questionID].visible ? "block" : "none";
     }
     return;
   }
@@ -249,8 +264,8 @@ async function pollAnswer(questionID) {
     console.log(`[Inject] Using cached answer for ${questionID}: ${savedAnswer}`);
     if (boxes[questionID]) {
       boxes[questionID].element.textContent = `Ответ: ${savedAnswer}`;
-      boxes[questionID].visible = true;
-      boxes[questionID].element.style.display = "block";
+      boxes[questionID].visible = getGlobalBoxVisibility();
+      boxes[questionID].element.style.display = boxes[questionID].visible ? "block" : "none";
     }
     return;
   }
@@ -267,8 +282,8 @@ async function pollAnswer(questionID) {
       boxes[questionID].element.textContent = `Ответ: ${data.answer}`;
       localStorage.setItem(`answer_${uid}_${questionID}`, data.answer);
       localStorage.setItem(`answer_${uid}_${questionID}_timestamp`, Date.now());
-      boxes[questionID].visible = true;
-      boxes[questionID].element.style.display = "block";
+      boxes[questionID].visible = getGlobalBoxVisibility();
+      boxes[questionID].element.style.display = boxes[questionID].visible ? "block" : "none";
       console.log(`[Inject] Answer for ${questionID}: ${data.answer}, saved to localStorage`);
     } else {
       setTimeout(() => pollAnswer(questionID), 2000);
@@ -337,8 +352,8 @@ async function handleQuestion(manualQuestionNumber = null) {
       createBox(questionID);
     }
     boxes[questionID].element.textContent = `Ответ: ${savedAnswer}`;
-    boxes[questionID].visible = true;
-    boxes[questionID].element.style.display = "block";
+    boxes[questionID].visible = getGlobalBoxVisibility();
+    boxes[questionID].element.style.display = boxes[questionID].visible ? "block" : "none";
     console.log(`[Inject] Restored cached answer for ${questionID}: ${savedAnswer}`);
     currentQuestionId = questionID;
     return;
@@ -356,8 +371,8 @@ async function handleQuestion(manualQuestionNumber = null) {
       createBox(questionID);
     }
     boxes[questionID].element.textContent = "Вопрос отправлен, ждём ответ...";
-    boxes[questionID].visible = true;
-    boxes[questionID].element.style.display = "block";
+    boxes[questionID].visible = getGlobalBoxVisibility();
+    boxes[questionID].element.style.display = boxes[questionID].visible ? "block" : "none";
     pollAnswer(questionID);
     return;
   }
@@ -368,8 +383,8 @@ async function handleQuestion(manualQuestionNumber = null) {
   if (!boxes[questionID]) {
     createBox(questionID);
   }
-  boxes[questionID].visible = true;
-  boxes[questionID].element.style.display = "block";
+  boxes[questionID].visible = getGlobalBoxVisibility();
+  boxes[questionID].element.style.display = boxes[questionID].visible ? "block" : "none";
 
   localStorage.setItem(`content_${uid}_${questionID}`, currentContent);
   localStorage.setItem(`content_${uid}_${questionID}_timestamp`, Date.now());
@@ -419,10 +434,25 @@ console.log("[Inject] Checking window.questions:", window.questions);
 // Очистка localStorage при полной перезагрузке
 window.addEventListener("unload", () => {
   Object.keys(localStorage)
-    .filter(key => key.startsWith(`answer_${uid}_`) || key.startsWith(`boxPosition_${uid}_`) || key.startsWith(`boxVisible_${uid}_`) || key.startsWith(`isSent_${uid}_`) || key.startsWith(`content_${uid}_`))
+    .filter(key => 
+      key.startsWith(`answer_${uid}_`) || 
+      key.startsWith(`boxPosition_${uid}_`) || 
+      key.startsWith(`boxVisible_${uid}_`) || 
+      key.startsWith(`isSent_${uid}_`) || 
+      key.startsWith(`content_${uid}_`) ||
+      key === `boxVisible_${uid}`
+    )
     .forEach(key => {
       localStorage.removeItem(key);
       localStorage.removeItem(`${key}_timestamp`);
     });
   console.log(`[Inject] Cleared localStorage on page unload`);
+});
+
+// Логирование загрузки скрипта для отладки CORS
+console.log(`[Inject] Attempting to load script from ${scriptSrc}`);
+fetch(scriptSrc).then(res => {
+  console.log(`[Inject] Script response: ${res.status}, CORS: ${res.headers.get('Access-Control-Allow-Origin')}`);
+}).catch(err => {
+  console.error(`[Inject] Script load failed: ${err.message}`);
 });
