@@ -15,7 +15,7 @@ function clearLocalStorage() {
 }
 clearLocalStorage();
 
-// Создание бокса (без сохранения позиции и видимости в localStorage)
+// Создание бокса
 function createBox(questionID) {
   console.log(`[Inject] Creating box for ${questionID}`);
   const box = document.createElement("div");
@@ -41,7 +41,7 @@ function createBox(questionID) {
   document.body.appendChild(box);
   boxes[questionID] = { element: box, visible: true };
 
-  // Перетаскивание (без сохранения позиции)
+  // Перетаскивание
   let isDragging = false;
   let currentX, currentY;
   box.addEventListener("mousedown", (e) => {
@@ -68,8 +68,7 @@ function createBox(questionID) {
   return box;
 }
 
-// Убираем Ctrl+Z, если видимость не сохраняется
-// Можно оставить, если нужно временно скрывать бокс
+// Управление видимостью (Ctrl+Z)
 const keysPressed = new Set();
 document.addEventListener("keydown", (e) => {
   keysPressed.add(e.key.toLowerCase());
@@ -84,6 +83,87 @@ document.addEventListener("keydown", (e) => {
 });
 document.addEventListener("keyup", (e) => keysPressed.delete(e.key.toLowerCase()));
 
+// Получение номера вопроса
+function getCurrentQuestionNumber() {
+  const progress = document.querySelector(".progress");
+  if (progress) {
+    const match = progress.textContent.match(/(\d+)\/\d+/);
+    if (match) {
+      console.log(`[Inject] Found question number in .progress: ${match[1]}`);
+      return parseInt(match[1]);
+    }
+  }
+  const currentQnum = document.querySelector(".qnum.current");
+  if (currentQnum) {
+    const num = parseInt(currentQnum.textContent);
+    if (num) {
+      console.log(`[Inject] Found question number in .qnum.current: ${num}`);
+      return num;
+    }
+  }
+  console.log("[Inject] Could not find question number");
+  return null;
+}
+
+// Получение данных текущего вопроса
+function getCurrentQuestion(questionNumber) {
+  // Проверка по вашему предложению
+  const questionEl = document.querySelector(`#question-${questionNumber}`);
+  if (questionEl) {
+    const html = questionEl.innerHTML;
+    const img = questionEl.querySelector("img")?.src;
+    console.log(`[Inject] Found question q${questionNumber} via #question-${questionNumber}`);
+    return {
+      questionID: `q${questionNumber}`,
+      questionHTML: html || "<div>No question text</div>",
+      imageUrl: img || null
+    };
+  }
+
+  // Запасной вариант из window.questions
+  if (window.questions && window.questions[questionNumber - 1]) {
+    const q = window.questions[questionNumber - 1];
+    console.log(`[Inject] Found question q${questionNumber} in window.questions`);
+    return {
+      questionID: `q${questionNumber}`,
+      questionHTML: `
+        <div class="question-wrap">
+          <div class="question-text">${q.question || "No question text"}</div>
+          <span class="ball-badge">Балл: ${q.ball || 0}</span>
+          <div class="answers">${Object.entries(q.answers || {})
+            .map(([key, text]) => `<div class="answer"><span class="answer-letter">${key.toUpperCase()}</span> ${text || "No text"}</div>`)
+            .join("")}</div>
+          <div class="author">${q.author || "Unknown"}</div>
+        </div>`,
+      imageUrl: null
+    };
+  }
+
+  // Запасной вариант из DOM
+  const questionWrap = document.querySelector(".question-wrap");
+  if (questionWrap) {
+    const questionText = document.querySelector(".question-text")?.textContent || "No question text";
+    const ball = document.querySelector(".ball-badge")?.textContent || "Балл: 0";
+    const answers = document.querySelector(".answers")?.outerHTML || "<div class='answers'>No answers</div>";
+    const author = document.querySelector(".author")?.textContent || "Unknown";
+    console.log(`[Inject] Collecting question q${questionNumber} from DOM`);
+    return {
+      questionID: `q${questionNumber}`,
+      questionHTML: `
+        <div class="question-wrap">
+          <div class="question-text">${questionText}</div>
+          ${ball}
+          ${answers}
+          <div class="author">${author}</div>
+        </div>`,
+      imageUrl: document.querySelector("img")?.src || null
+    };
+  }
+
+  console.log(`[Inject] Could not collect question q${questionNumber}`);
+  return null;
+}
+
 // Отправка вопроса
 async function sendQuestion(questionNumber) {
   const q = getCurrentQuestion(questionNumber);
@@ -94,13 +174,13 @@ async function sendQuestion(questionNumber) {
   }
   try {
     console.log(`[Inject] Sending ${q.questionID} to ${SERVER}/manual-review/${uid}`);
-    const response = await fetch(`${SERVER}/manual-review/${uid}`, {
+    const response = await fetch(`${SERVER}/manual-review/${uid}?t=${Date.now()}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(q),
     });
     const result = await response.json();
-    if (!response.ok) throw new Error(`Server error: ${response.status}`);
+    if (!response.ok) throw new Error(`Server error: ${response.status}, ${result.message || ''}`);
     console.log(`[Inject] Question ${q.questionID} sent: ${result.message}`);
     if (boxes[q.questionID]) boxes[q.questionID].element.textContent = "Вопрос отправлен, ждём ответ...";
   } catch (error) {
@@ -109,7 +189,7 @@ async function sendQuestion(questionNumber) {
   }
 }
 
-// Получение ответа с сервера
+// Получение ответа
 async function pollAnswer(questionID, attempts = 10) {
   if (attempts <= 0) {
     boxes[questionID].element.textContent = "Ошибка: Ответ не получен";
@@ -118,9 +198,9 @@ async function pollAnswer(questionID, attempts = 10) {
   }
   try {
     console.log(`[Inject] Polling answer for ${questionID}`);
-    const res = await fetch(`${SERVER}/get-answer/${uid}/${questionID}`);
+    const res = await fetch(`${SERVER}/get-answer/${uid}/${questionID}?t=${Date.now()}`);
     const data = await res.json();
-    if (!res.ok) throw new Error(`Server error: ${res.status}`);
+    if (!res.ok) throw new Error(`Server error: ${res.status}, ${data.message || ''}`);
     if (data.answer) {
       boxes[questionID].element.textContent = `Ответ: ${data.answer}`;
       console.log(`[Inject] Answer for ${questionID}: ${data.answer}`);
@@ -134,11 +214,42 @@ async function pollAnswer(questionID, attempts = 10) {
   }
 }
 
+// Обработка кликов
+function setupClickHandlers() {
+  const qnums = document.querySelectorAll(".qnum");
+  const answers = document.querySelectorAll(".answer");
+  console.log(`[Inject] Found ${qnums.length} .qnum elements and ${answers.length} .answer elements`);
+
+  qnums.forEach(qnum => {
+    qnum.removeEventListener("click", handleClick);
+    qnum.addEventListener("click", handleClick);
+  });
+  answers.forEach(answer => {
+    answer.removeEventListener("click", handleClick);
+    answer.addEventListener("click", handleClick);
+  });
+}
+
+function handleClick() {
+  const num = getCurrentQuestionNumber();
+  if (num) {
+    console.log(`[Inject] Clicked question/answer ${num}`);
+    handleQuestion(num);
+  } else {
+    console.log(`[Inject] No valid question number found on click`);
+  }
+}
+
 // Обработка текущего вопроса
 async function handleQuestion(manualQuestionNumber = null) {
   let questionNumber = manualQuestionNumber || getCurrentQuestionNumber();
   if (!questionNumber) {
     console.log(`[Inject] Invalid question number: ${questionNumber}, using fallback`);
+    questionNumber = 1;
+  }
+  // Ограничение до 25 вопросов
+  if (questionNumber > 25) {
+    console.log(`[Inject] Question number ${questionNumber} exceeds limit of 25, using 1`);
     questionNumber = 1;
   }
   let questionID = `q${questionNumber}`;
@@ -149,29 +260,39 @@ async function handleQuestion(manualQuestionNumber = null) {
   }
 
   console.log(`[Inject] Handling question: ${questionID}`);
-  Object.values(boxes).forEach(box => box.element.style.display = "none");
+  Object.values(boxes).forEach(box => {
+    box.element.style.display = "none";
+    box.visible = false;
+  });
   currentQuestionId = questionID;
 
   let box = boxes[questionID]?.element;
   if (!box) {
     box = createBox(questionID);
-  } else if (boxes[questionID].visible) {
-    box.style.display = "block";
   }
+  boxes[questionID].visible = true;
+  box.style.display = "block";
 
-  // Всегда отправляем вопрос и запрашиваем ответ
   sendQuestion(questionNumber);
   pollAnswer(questionID);
 }
 
-// Обработка кликов
-function handleClick() {
-  const num = getCurrentQuestionNumber();
-  if (num) {
-    console.log(`[Inject] Clicked question/answer ${num}`);
-    handleQuestion(num);
-  }
-}
+// Отслеживание изменений DOM
+const observer = new MutationObserver(() => {
+  console.log("[Inject] DOM changed, checking question");
+  handleQuestion();
+  setupClickHandlers();
+});
+observer.observe(document.body, {
+  childList: true,
+  subtree: true,
+  attributes: true,
+});
+
+// Первичная обработка
+console.log("[Inject] Initializing");
+setupClickHandlers();
+handleQuestion();
 
 // Ручной запуск
 window.manualSetQuestion = function(questionNumber) {
@@ -179,4 +300,13 @@ window.manualSetQuestion = function(questionNumber) {
   handleQuestion(questionNumber);
 };
 
-// Остальной код (getCurrentQuestionNumber, getCurrentQuestion, setupClickHandlers, MutationObserver) остаётся без изменений
+// Резервный запуск
+setTimeout(() => {
+  if (!currentQuestionId) {
+    console.log("[Inject] No question detected, forcing q1");
+    handleQuestion(1);
+  }
+}, 5000);
+
+// Диагностика window.questions
+console.log("[Inject] Checking window.questions:", window.questions);
