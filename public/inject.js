@@ -4,6 +4,7 @@ const uid = scriptSrc.match(/\/(u1|u2|mohir)/)?.[1] || "u1";
 const boxes = {};
 let currentQuestionId = null;
 const STORAGE_TIMEOUT = 50 * 60 * 1000; // 50 минут в миллисекундах
+const MAX_QUESTIONS = 25; // Поддержка до 25 вопросов
 
 console.log(`[Inject] UID: ${uid}, Script loaded`);
 
@@ -307,7 +308,7 @@ function handleClick() {
 // Обработка текущего вопроса
 async function handleQuestion(manualQuestionNumber = null) {
   let questionNumber = manualQuestionNumber || getCurrentQuestionNumber();
-  if (!questionNumber || questionNumber < 1 || questionNumber > 10) {
+  if (!questionNumber || questionNumber < 1 || questionNumber > MAX_QUESTIONS) {
     console.log(`[Inject] Invalid question number: ${questionNumber}, using fallback`);
     questionNumber = 1;
   }
