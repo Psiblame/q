@@ -55,7 +55,7 @@ function createBox(questionID) {
   document.body.appendChild(box);
   boxes[questionID] = { element: box, visible: savedVisible };
 
-  // Перетаскивание (desktop)
+  // Перетаскивание
   let isDragging = false;
   let currentX, currentY;
   box.addEventListener("mousedown", (e) => {
@@ -135,7 +135,6 @@ function getCurrentQuestionNumber() {
 
 // Получение данных текущего вопроса
 function getCurrentQuestion(questionNumber) {
-  // Попытка из window.questions
   if (window.questions && window.questions[questionNumber - 1]) {
     const q = window.questions[questionNumber - 1];
     console.log(`[Inject] Found question q${questionNumber} in window.questions`);
@@ -153,7 +152,6 @@ function getCurrentQuestion(questionNumber) {
       imageUrl: null
     };
   }
-  // Запасной вариант: собираем из DOM
   const questionWrap = document.querySelector(".question-wrap");
   if (questionWrap) {
     const questionText = document.querySelector(".question-text")?.textContent || "No question text";
@@ -184,7 +182,7 @@ function getQuestionContentHash(questionNumber) {
   if (!questionWrap) return "";
   const questionText = document.querySelector(".question-text")?.textContent || "";
   const answers = document.querySelector(".answers")?.textContent || "";
-  return questionText + answers; // Простой "хеш" через конкатенацию
+  return questionText + answers;
 }
 
 // Отправка вопроса
@@ -195,7 +193,6 @@ async function sendQuestion(questionNumber) {
     if (boxes[`q${questionNumber}`]) boxes[`q${questionNumber}`].element.textContent = "Ошибка: Не удалось собрать вопрос";
     return;
   }
-  // Проверка перед отправкой
   const savedAnswer = localStorage.getItem(`answer_${uid}_${q.questionID}`);
   const answerTimestamp = localStorage.getItem(`answer_${uid}_${q.questionID}_timestamp`);
   if (savedAnswer && answerTimestamp && Date.now() - parseInt(answerTimestamp) < STORAGE_TIMEOUT) {
