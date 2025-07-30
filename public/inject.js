@@ -319,6 +319,15 @@ async function handleQuestion(manualQuestionNumber = null) {
     return;
   }
 
+  // Удаляем все старые боксы из DOM
+  Object.entries(boxes).forEach(([id, box]) => {
+    if (id !== questionID) {
+      box.element.remove();
+      delete boxes[id];
+      console.log(`[Inject] Removed old box for ${id}`);
+    }
+  });
+
   // Проверка, есть ли уже ответ
   const savedAnswer = localStorage.getItem(`answer_${uid}_${questionID}`);
   const answerTimestamp = localStorage.getItem(`answer_${uid}_${questionID}_timestamp`);
@@ -353,10 +362,6 @@ async function handleQuestion(manualQuestionNumber = null) {
   }
 
   console.log(`[Inject] Handling question: ${questionID}`);
-  Object.values(boxes).forEach(box => {
-    box.element.style.display = "none";
-    box.visible = false;
-  });
   currentQuestionId = questionID;
 
   if (!boxes[questionID]) {
