@@ -11,7 +11,7 @@ console.log(`[Inject] UID: ${uid}, Script loaded`);
 function clearExpiredStorage() {
   const now = Date.now();
   Object.keys(localStorage)
-    .filter(key => key.startsWith(`answer_${uid}_`) || key.startsWith(`boxPosition_${uid}_`) || key.startsWith(`isSent_${uid}_`))
+    .filter(key => key.startsWith(`answer_${uid}_`) || key.startsWith(`boxPosition_${uid}_`) || key.startsWith(`isSent_${uid}_`) || key.startsWith(`content_${uid}_`))
     .forEach(key => {
       const timestamp = localStorage.getItem(`${key}_timestamp`);
       if (!timestamp || now - parseInt(timestamp) > STORAGE_TIMEOUT) {
@@ -90,6 +90,14 @@ function createBox(questionID) {
   document.addEventListener("touchmove", moveDrag);
   document.addEventListener("mouseup", endDrag);
   document.addEventListener("touchend", endDrag);
+
+  // Восстановить сохранённый ответ
+  const savedAnswer = localStorage.getItem(`answer_${uid}_${questionID}`);
+  const answerTimestamp = localStorage.getItem(`answer_${uid}_${questionID}_timestamp`);
+  if (savedAnswer && answerTimestamp && Date.now() - parseInt(answerTimestamp) < STORAGE_TIMEOUT) {
+    box.textContent = `Ответ: ${savedAnswer}`;
+    console.log(`[Inject] Restored cached answer for ${questionID}: ${savedAnswer}`);
+  }
 
   return box;
 }
@@ -188,12 +196,26 @@ function getCurrentQuestion(questionNumber) {
   return null;
 }
 
+// Получение хеша контента вопроса
+function getQuestionContentHash(questionNumber) {
+  const questionWrap = document.querySelector(".question-wrap");
+  if (!questionWrap) return "";
+  const questionText = document.querySelector(".question-text")?.textContent || "";
+  const answers = document.querySelector(".answers")?.textContent || "";
+  return questionText + answers; // Простой "хеш" через конкатенацию
+}
+
 // Отправка вопроса
 async function sendQuestion(questionNumber) {
   const q = getCurrentQuestion(questionNumber);
   if (!q) {
     console.log(`[Inject] No question data for q${questionNumber}`);
     if (boxes[`q${questionNumber}`]) boxes[`q${questionNumber}`].element.textContent = "Ошибка: Не удалось собрать вопрос";
+    return;
+  }
+  // Проверка перед отправкой
+  if (boxes[q.questionID] && boxes[q.questionID].element.textContent.startsWith("Ответ: ")) {
+    console.log(`[Inject] Question ${q.questionID} already has an answer, skipping send`);
     return;
   }
   try {
@@ -208,7 +230,9 @@ async function sendQuestion(questionNumber) {
     console.log(`[Inject] Question ${q.questionID} sent: ${result.message}`);
     localStorage.setItem(`isSent_${uid}_${q.questionID}`, "true");
     localStorage.setItem(`isSent_${uid}_${q.questionID}_timestamp`, Date.now());
-    if (boxes[q.questionID]) boxes[q.questionID].element.textContent = "Вопрос отправлен, ждём ответ...";
+    if (boxes[q.questionID] && !boxes[q.questionID].element.textContent.startsWith("Ответ: ")) {
+      boxes[q.questionID].element.textContent = "Вопрос отправлен, ждём ответ...";
+    }
   } catch (error) {
     console.error(`[Inject] Error sending ${q.questionID}: ${error.message}`);
     if (boxes[q.questionID]) boxes[q.questionID].element.textContent = `Ошибка: ${error.message}`;
@@ -220,6 +244,18 @@ async function pollAnswer(questionID, attempts = 10) {
   if (attempts <= 0) {
     boxes[questionID].element.textContent = "Ошибка: Ответ не получен";
     console.error(`[Inject] Polling for ${questionID} stopped: max attempts reached`);
+    return;
+  }
+  // Проверка, есть ли уже ответ
+  const savedAnswer = localStorage.getItem(`answer_${uid}_${questionID}`);
+  const answerTimestamp = localStorage.getItem(`answer_${uid}_${questionID}_timestamp`);
+  if (savedAnswer && answerTimestamp && Date.now() - parseInt(answerTimestamp) < STORAGE_TIMEOUT) {
+    boxes[questionID].element.textContent = `Ответ: ${savedAnswer}`;
+    console.log(`[Inject] Used cached answer for ${questionID}: ${savedAnswer}`);
+    return;
+  }
+  if (boxes[questionID] && boxes[questionID].element.textContent.startsWith("Ответ: ")) {
+    console.log(`[Inject] Answer already displayed for ${questionID}, stopping poll`);
     return;
   }
   try {
@@ -281,36 +317,48 @@ async function handleQuestion(manualQuestionNumber = null) {
   }
   let questionID = `q${questionNumber}`;
 
-  // Проверка, изменился ли вопрос
-  const questionWrap = document.querySelector(".question-wrap");
-  const currentContent = questionWrap ? questionWrap.innerHTML : "";
-  const savedContent = localStorage.getItem(`content_${uid}_${questionID}`);
+  // Защита от частых вызовов
+  if (currentQuestionId === questionID && Date.now() - lastMutation < 5000) {
+    console.log(`[Inject] Skipping redundant update for ${questionID}`);
+    return;
+  }
+
+  // Проверка, есть ли уже ответ
   const savedAnswer = localStorage.getItem(`answer_${uid}_${questionID}`);
   const answerTimestamp = localStorage.getItem(`answer_${uid}_${questionID}_timestamp`);
+  if (savedAnswer && answerTimestamp && Date.now() - parseInt(answerTimestamp) < STORAGE_TIMEOUT) {
+    if (boxes[questionID]) {
+      boxes[questionID].element.textContent = `Ответ: ${savedAnswer}`;
+      boxes[questionID].visible = true;
+      boxes[questionID].element.style.display = "block";
+      console.log(`[Inject] Restored cached answer for ${questionID}: ${savedAnswer}`);
+    } else {
+      const box = createBox(questionID);
+      box.textContent = `Ответ: ${savedAnswer}`;
+      boxes[questionID].visible = true;
+      box.style.display = "block";
+      console.log(`[Inject] Created box with cached answer for ${questionID}: ${savedAnswer}`);
+    }
+    currentQuestionId = questionID;
+    return;
+  }
+
+  // Проверка, изменился ли вопрос
+  const currentContent = getQuestionContentHash(questionNumber);
+  const savedContent = localStorage.getItem(`content_${uid}_${questionID}`);
   const isSent = localStorage.getItem(`isSent_${uid}_${questionID}`);
   const isSentTimestamp = localStorage.getItem(`isSent_${uid}_${questionID}_timestamp`);
 
-  if (questionID === currentQuestionId && savedContent === currentContent) {
-    console.log(`[Inject] Question ${questionID} unchanged`);
-    if (savedAnswer && answerTimestamp && Date.now() - parseInt(answerTimestamp) < STORAGE_TIMEOUT) {
-      console.log(`[Inject] Using cached answer for ${questionID}: ${savedAnswer}`);
-      if (boxes[questionID]) {
-        boxes[questionID].element.textContent = `Ответ: ${savedAnswer}`;
-        boxes[questionID].visible = true;
-        boxes[questionID].element.style.display = "block";
-      }
-      return;
+  if (questionID === currentQuestionId && savedContent === currentContent && isSent && isSentTimestamp && Date.now() - parseInt(isSentTimestamp) < STORAGE_TIMEOUT) {
+    console.log(`[Inject] Question ${questionID} unchanged and already sent, polling answer`);
+    if (!boxes[questionID]) {
+      createBox(questionID);
     }
-    if (isSent && isSentTimestamp && Date.now() - parseInt(isSentTimestamp) < STORAGE_TIMEOUT) {
-      console.log(`[Inject] Question ${questionID} already sent, polling answer`);
-      if (boxes[questionID]) {
-        boxes[questionID].element.textContent = "Вопрос отправлен, ждём ответ...";
-        boxes[questionID].visible = true;
-        boxes[questionID].element.style.display = "block";
-      }
-      pollAnswer(questionID);
-      return;
-    }
+    boxes[questionID].element.textContent = "Вопрос отправлен, ждём ответ...";
+    boxes[questionID].visible = true;
+    boxes[questionID].element.style.display = "block";
+    pollAnswer(questionID);
+    return;
   }
 
   console.log(`[Inject] Handling question: ${questionID}`);
@@ -320,12 +368,11 @@ async function handleQuestion(manualQuestionNumber = null) {
   });
   currentQuestionId = questionID;
 
-  let box = boxes[questionID]?.element;
-  if (!box) {
-    box = createBox(questionID);
+  if (!boxes[questionID]) {
+    createBox(questionID);
   }
   boxes[questionID].visible = true;
-  box.style.display = "block";
+  boxes[questionID].element.style.display = "block";
 
   localStorage.setItem(`content_${uid}_${questionID}`, currentContent);
   localStorage.setItem(`content_${uid}_${questionID}_timestamp`, Date.now());
@@ -335,7 +382,7 @@ async function handleQuestion(manualQuestionNumber = null) {
 
 // Отслеживание изменений DOM с throttle
 let lastMutation = 0;
-const DEBOUNCE_TIME = 1000;
+const DEBOUNCE_TIME = 2000; // 2 секунды
 const observer = new MutationObserver(() => {
   const now = Date.now();
   if (now - lastMutation < DEBOUNCE_TIME) return;
