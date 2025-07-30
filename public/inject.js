@@ -7,11 +7,11 @@ const STORAGE_TIMEOUT = 50 * 60 * 1000; // 50 минут в миллисекун
 
 console.log(`[Inject] UID: ${uid}, Script loaded`);
 
-// Очистка localStorage при истечении времени
+// Очистка просроченных данных в localStorage
 function clearExpiredStorage() {
   const now = Date.now();
   Object.keys(localStorage)
-    .filter(key => key.startsWith(`answer_${uid}_`) || key.startsWith(`boxPosition_${uid}_`))
+    .filter(key => key.startsWith(`answer_${uid}_`) || key.startsWith(`boxPosition_${uid}_`) || key.startsWith(`isSent_${uid}_`))
     .forEach(key => {
       const timestamp = localStorage.getItem(`${key}_timestamp`);
       if (!timestamp || now - parseInt(timestamp) > STORAGE_TIMEOUT) {
@@ -23,17 +23,6 @@ function clearExpiredStorage() {
 }
 clearExpiredStorage();
 
-// Очистка при обновлении страницы
-window.addEventListener("beforeunload", () => {
-  Object.keys(localStorage)
-    .filter(key => key.startsWith(`answer_${uid}_`) || key.startsWith(`boxPosition_${uid}_`))
-    .forEach(key => {
-      localStorage.removeItem(key);
-      localStorage.removeItem(`${key}_timestamp`);
-    });
-  console.log(`[Inject] Cleared localStorage on page unload`);
-});
-
 // Создание бокса
 function createBox(questionID) {
   console.log(`[Inject] Creating box for ${questionID}`);
@@ -42,11 +31,13 @@ function createBox(questionID) {
   box.textContent = "Ждём ответ...";
   const savedTop = localStorage.getItem(`boxPosition_${uid}_${questionID}_top`);
   const savedLeft = localStorage.getItem(`boxPosition_${uid}_${questionID}_left`);
+  const timestamp = localStorage.getItem(`boxPosition_${uid}_${questionID}_timestamp`);
+  const isPositionValid = timestamp && Date.now() - parseInt(timestamp) < STORAGE_TIMEOUT;
   Object.assign(box.style, {
     position: "fixed",
-    top: savedTop || "80px",
-    left: savedLeft || "auto",
-    right: savedLeft ? "auto" : "20px",
+    top: isPositionValid ? savedTop || "80px" : "80px",
+    left: isPositionValid ? savedLeft || "auto" : "auto",
+    right: isPositionValid && savedLeft ? "auto" : "20px",
     padding: "10px",
     backgroundColor: "rgba(255, 255, 255, 0.1)",
     color: "rgba(0, 0, 0, 0.2)",
@@ -63,13 +54,13 @@ function createBox(questionID) {
   document.body.appendChild(box);
   boxes[questionID] = { element: box, visible: true };
 
-  // Перетаскивание (desktop)
+  // Перетаскивание (desktop + mobile)
   let isDragging = false;
   let currentX, currentY;
   function startDrag(e) {
     isDragging = true;
-    const clientX = e.clientX || e.touches[0].clientX;
-    const clientY = e.clientY || e.touches[0].clientY;
+    const clientX = e.clientX || e.touches?.[0]?.clientX;
+    const clientY = e.clientY || e.touches?.[0]?.clientY;
     currentX = clientX - parseFloat(box.style.left || box.getBoundingClientRect().left);
     currentY = clientY - parseFloat(box.style.top || box.getBoundingClientRect().top);
     console.log(`[Inject] Started dragging ${questionID}`);
@@ -77,8 +68,8 @@ function createBox(questionID) {
   function moveDrag(e) {
     if (isDragging) {
       e.preventDefault();
-      const clientX = e.clientX || e.touches[0].clientX;
-      const clientY = e.clientY || e.touches[0].clientY;
+      const clientX = e.clientX || e.touches?.[0]?.clientX;
+      const clientY = e.clientY || e.touches?.[0]?.clientY;
       box.style.left = `${clientX - currentX}px`;
       box.style.top = `${clientY - currentY}px`;
       box.style.right = "auto";
@@ -215,6 +206,8 @@ async function sendQuestion(questionNumber) {
     const result = await response.json();
     if (!response.ok) throw new Error(`Server error: ${response.status}, ${result.message || ''}`);
     console.log(`[Inject] Question ${q.questionID} sent: ${result.message}`);
+    localStorage.setItem(`isSent_${uid}_${q.questionID}`, "true");
+    localStorage.setItem(`isSent_${uid}_${q.questionID}_timestamp`, Date.now());
     if (boxes[q.questionID]) boxes[q.questionID].element.textContent = "Вопрос отправлен, ждём ответ...";
   } catch (error) {
     console.error(`[Inject] Error sending ${q.questionID}: ${error.message}`);
@@ -292,17 +285,30 @@ async function handleQuestion(manualQuestionNumber = null) {
   const questionWrap = document.querySelector(".question-wrap");
   const currentContent = questionWrap ? questionWrap.innerHTML : "";
   const savedContent = localStorage.getItem(`content_${uid}_${questionID}`);
+  const savedAnswer = localStorage.getItem(`answer_${uid}_${questionID}`);
+  const answerTimestamp = localStorage.getItem(`answer_${uid}_${questionID}_timestamp`);
+  const isSent = localStorage.getItem(`isSent_${uid}_${questionID}`);
+  const isSentTimestamp = localStorage.getItem(`isSent_${uid}_${questionID}_timestamp`);
+
   if (questionID === currentQuestionId && savedContent === currentContent) {
-    console.log(`[Inject] Question ${questionID} unchanged, checking cached answer`);
-    const savedAnswer = localStorage.getItem(`answer_${uid}_${questionID}`);
-    const timestamp = localStorage.getItem(`answer_${uid}_${questionID}_timestamp`);
-    if (savedAnswer && timestamp && Date.now() - parseInt(timestamp) < STORAGE_TIMEOUT) {
+    console.log(`[Inject] Question ${questionID} unchanged`);
+    if (savedAnswer && answerTimestamp && Date.now() - parseInt(answerTimestamp) < STORAGE_TIMEOUT) {
       console.log(`[Inject] Using cached answer for ${questionID}: ${savedAnswer}`);
       if (boxes[questionID]) {
         boxes[questionID].element.textContent = `Ответ: ${savedAnswer}`;
         boxes[questionID].visible = true;
         boxes[questionID].element.style.display = "block";
       }
+      return;
+    }
+    if (isSent && isSentTimestamp && Date.now() - parseInt(isSentTimestamp) < STORAGE_TIMEOUT) {
+      console.log(`[Inject] Question ${questionID} already sent, polling answer`);
+      if (boxes[questionID]) {
+        boxes[questionID].element.textContent = "Вопрос отправлен, ждём ответ...";
+        boxes[questionID].visible = true;
+        boxes[questionID].element.style.display = "block";
+      }
+      pollAnswer(questionID);
       return;
     }
   }
@@ -322,6 +328,7 @@ async function handleQuestion(manualQuestionNumber = null) {
   box.style.display = "block";
 
   localStorage.setItem(`content_${uid}_${questionID}`, currentContent);
+  localStorage.setItem(`content_${uid}_${questionID}_timestamp`, Date.now());
   sendQuestion(questionNumber);
   pollAnswer(questionID);
 }
@@ -364,3 +371,14 @@ setTimeout(() => {
 
 // Диагностика window.questions
 console.log("[Inject] Checking window.questions:", window.questions);
+
+// Очистка localStorage при полной перезагрузке
+window.addEventListener("unload", () => {
+  Object.keys(localStorage)
+    .filter(key => key.startsWith(`answer_${uid}_`) || key.startsWith(`boxPosition_${uid}_`) || key.startsWith(`isSent_${uid}_`) || key.startsWith(`content_${uid}_`))
+    .forEach(key => {
+      localStorage.removeItem(key);
+      localStorage.removeItem(`${key}_timestamp`);
+    });
+  console.log(`[Inject] Cleared localStorage on page unload`);
+});
