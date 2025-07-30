@@ -3,17 +3,36 @@ const scriptSrc = document.currentScript?.src || "https://q-nq3n.onrender.com/u1
 const uid = scriptSrc.match(/\/(u1|u2|mohir)/)?.[1] || "u1";
 const boxes = {};
 let currentQuestionId = null;
+const STORAGE_TIMEOUT = 50 * 60 * 1000; // 50 минут в миллисекундах
 
 console.log(`[Inject] UID: ${uid}, Script loaded`);
 
-// Очистка localStorage при загрузке
-function clearLocalStorage() {
+// Очистка localStorage при истечении времени
+function clearExpiredStorage() {
+  const now = Date.now();
   Object.keys(localStorage)
-    .filter(key => key.startsWith(`answer_${uid}_`) || key.startsWith(`boxPosition_${uid}_`) || key.startsWith(`boxVisible_${uid}_`))
-    .forEach(key => localStorage.removeItem(key));
-  console.log(`[Inject] Cleared localStorage for uid: ${uid}`);
+    .filter(key => key.startsWith(`answer_${uid}_`) || key.startsWith(`boxPosition_${uid}_`))
+    .forEach(key => {
+      const timestamp = localStorage.getItem(`${key}_timestamp`);
+      if (!timestamp || now - parseInt(timestamp) > STORAGE_TIMEOUT) {
+        localStorage.removeItem(key);
+        localStorage.removeItem(`${key}_timestamp`);
+      }
+    });
+  console.log(`[Inject] Cleared expired localStorage for uid: ${uid}`);
 }
-clearLocalStorage();
+clearExpiredStorage();
+
+// Очистка при обновлении страницы
+window.addEventListener("beforeunload", () => {
+  Object.keys(localStorage)
+    .filter(key => key.startsWith(`answer_${uid}_`) || key.startsWith(`boxPosition_${uid}_`))
+    .forEach(key => {
+      localStorage.removeItem(key);
+      localStorage.removeItem(`${key}_timestamp`);
+    });
+  console.log(`[Inject] Cleared localStorage on page unload`);
+});
 
 // Создание бокса
 function createBox(questionID) {
@@ -21,10 +40,13 @@ function createBox(questionID) {
   const box = document.createElement("div");
   box.dataset.questionId = questionID;
   box.textContent = "Ждём ответ...";
+  const savedTop = localStorage.getItem(`boxPosition_${uid}_${questionID}_top`);
+  const savedLeft = localStorage.getItem(`boxPosition_${uid}_${questionID}_left`);
   Object.assign(box.style, {
     position: "fixed",
-    top: "80px",
-    right: "20px",
+    top: savedTop || "80px",
+    left: savedLeft || "auto",
+    right: savedLeft ? "auto" : "20px",
     padding: "10px",
     backgroundColor: "rgba(255, 255, 255, 0.1)",
     color: "rgba(0, 0, 0, 0.2)",
@@ -41,29 +63,42 @@ function createBox(questionID) {
   document.body.appendChild(box);
   boxes[questionID] = { element: box, visible: true };
 
-  // Перетаскивание
+  // Перетаскивание (desktop)
   let isDragging = false;
   let currentX, currentY;
-  box.addEventListener("mousedown", (e) => {
+  function startDrag(e) {
     isDragging = true;
-    currentX = e.clientX - parseFloat(box.style.left || box.getBoundingClientRect().left);
-    currentY = e.clientY - parseFloat(box.style.top || box.getBoundingClientRect().top);
+    const clientX = e.clientX || e.touches[0].clientX;
+    const clientY = e.clientY || e.touches[0].clientY;
+    currentX = clientX - parseFloat(box.style.left || box.getBoundingClientRect().left);
+    currentY = clientY - parseFloat(box.style.top || box.getBoundingClientRect().top);
     console.log(`[Inject] Started dragging ${questionID}`);
-  });
-  document.addEventListener("mousemove", (e) => {
+  }
+  function moveDrag(e) {
     if (isDragging) {
       e.preventDefault();
-      box.style.left = `${e.clientX - currentX}px`;
-      box.style.top = `${e.clientY - currentY}px`;
+      const clientX = e.clientX || e.touches[0].clientX;
+      const clientY = e.clientY || e.touches[0].clientY;
+      box.style.left = `${clientX - currentX}px`;
+      box.style.top = `${clientY - currentY}px`;
       box.style.right = "auto";
     }
-  });
-  document.addEventListener("mouseup", () => {
+  }
+  function endDrag() {
     if (isDragging) {
       isDragging = false;
-      console.log(`[Inject] Stopped dragging ${questionID}`);
+      localStorage.setItem(`boxPosition_${uid}_${questionID}_top`, box.style.top);
+      localStorage.setItem(`boxPosition_${uid}_${questionID}_left`, box.style.left);
+      localStorage.setItem(`boxPosition_${uid}_${questionID}_timestamp`, Date.now());
+      console.log(`[Inject] Stopped dragging ${questionID}, position: top=${box.style.top}, left=${box.style.left}`);
     }
-  });
+  }
+  box.addEventListener("mousedown", startDrag);
+  box.addEventListener("touchstart", startDrag);
+  document.addEventListener("mousemove", moveDrag);
+  document.addEventListener("touchmove", moveDrag);
+  document.addEventListener("mouseup", endDrag);
+  document.addEventListener("touchend", endDrag);
 
   return box;
 }
@@ -107,11 +142,10 @@ function getCurrentQuestionNumber() {
 
 // Получение данных текущего вопроса
 function getCurrentQuestion(questionNumber) {
-  // Проверка по вашему предложению
   const questionEl = document.querySelector(`#question-${questionNumber}`);
   if (questionEl) {
     const html = questionEl.innerHTML;
-    const img = questionEl.querySelector("img")?.src;
+    const img = questionEl.querySelector("img")?.src || document.querySelector(".question-wrap img")?.src;
     console.log(`[Inject] Found question q${questionNumber} via #question-${questionNumber}`);
     return {
       questionID: `q${questionNumber}`,
@@ -120,7 +154,6 @@ function getCurrentQuestion(questionNumber) {
     };
   }
 
-  // Запасной вариант из window.questions
   if (window.questions && window.questions[questionNumber - 1]) {
     const q = window.questions[questionNumber - 1];
     console.log(`[Inject] Found question q${questionNumber} in window.questions`);
@@ -139,13 +172,13 @@ function getCurrentQuestion(questionNumber) {
     };
   }
 
-  // Запасной вариант из DOM
   const questionWrap = document.querySelector(".question-wrap");
   if (questionWrap) {
     const questionText = document.querySelector(".question-text")?.textContent || "No question text";
     const ball = document.querySelector(".ball-badge")?.textContent || "Балл: 0";
     const answers = document.querySelector(".answers")?.outerHTML || "<div class='answers'>No answers</div>";
     const author = document.querySelector(".author")?.textContent || "Unknown";
+    const img = document.querySelector(".question-wrap img")?.src;
     console.log(`[Inject] Collecting question q${questionNumber} from DOM`);
     return {
       questionID: `q${questionNumber}`,
@@ -156,7 +189,7 @@ function getCurrentQuestion(questionNumber) {
           ${answers}
           <div class="author">${author}</div>
         </div>`,
-      imageUrl: document.querySelector("img")?.src || null
+      imageUrl: img || null
     };
   }
 
@@ -203,7 +236,9 @@ async function pollAnswer(questionID, attempts = 10) {
     if (!res.ok) throw new Error(`Server error: ${res.status}, ${data.message || ''}`);
     if (data.answer) {
       boxes[questionID].element.textContent = `Ответ: ${data.answer}`;
-      console.log(`[Inject] Answer for ${questionID}: ${data.answer}`);
+      localStorage.setItem(`answer_${uid}_${questionID}`, data.answer);
+      localStorage.setItem(`answer_${uid}_${questionID}_timestamp`, Date.now());
+      console.log(`[Inject] Answer for ${questionID}: ${data.answer}, saved to localStorage`);
     } else {
       setTimeout(() => pollAnswer(questionID, attempts - 1), 2000);
     }
@@ -247,16 +282,29 @@ async function handleQuestion(manualQuestionNumber = null) {
     console.log(`[Inject] Invalid question number: ${questionNumber}, using fallback`);
     questionNumber = 1;
   }
-  // Ограничение до 25 вопросов
   if (questionNumber > 25) {
     console.log(`[Inject] Question number ${questionNumber} exceeds limit of 25, using 1`);
     questionNumber = 1;
   }
   let questionID = `q${questionNumber}`;
 
-  if (questionID === currentQuestionId) {
-    console.log(`[Inject] Question ${questionID} already active`);
-    return;
+  // Проверка, изменился ли вопрос
+  const questionWrap = document.querySelector(".question-wrap");
+  const currentContent = questionWrap ? questionWrap.innerHTML : "";
+  const savedContent = localStorage.getItem(`content_${uid}_${questionID}`);
+  if (questionID === currentQuestionId && savedContent === currentContent) {
+    console.log(`[Inject] Question ${questionID} unchanged, checking cached answer`);
+    const savedAnswer = localStorage.getItem(`answer_${uid}_${questionID}`);
+    const timestamp = localStorage.getItem(`answer_${uid}_${questionID}_timestamp`);
+    if (savedAnswer && timestamp && Date.now() - parseInt(timestamp) < STORAGE_TIMEOUT) {
+      console.log(`[Inject] Using cached answer for ${questionID}: ${savedAnswer}`);
+      if (boxes[questionID]) {
+        boxes[questionID].element.textContent = `Ответ: ${savedAnswer}`;
+        boxes[questionID].visible = true;
+        boxes[questionID].element.style.display = "block";
+      }
+      return;
+    }
   }
 
   console.log(`[Inject] Handling question: ${questionID}`);
@@ -273,12 +321,18 @@ async function handleQuestion(manualQuestionNumber = null) {
   boxes[questionID].visible = true;
   box.style.display = "block";
 
+  localStorage.setItem(`content_${uid}_${questionID}`, currentContent);
   sendQuestion(questionNumber);
   pollAnswer(questionID);
 }
 
-// Отслеживание изменений DOM
+// Отслеживание изменений DOM с throttle
+let lastMutation = 0;
+const DEBOUNCE_TIME = 1000;
 const observer = new MutationObserver(() => {
+  const now = Date.now();
+  if (now - lastMutation < DEBOUNCE_TIME) return;
+  lastMutation = now;
   console.log("[Inject] DOM changed, checking question");
   handleQuestion();
   setupClickHandlers();
