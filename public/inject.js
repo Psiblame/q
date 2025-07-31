@@ -63,13 +63,13 @@ function createBox(questionID) {
     right: isPositionValid ? savedRight || "20px" : "20px",
     left: isPositionValid && savedRight === "auto" ? localStorage.getItem(`boxPosition_${uid}_${questionID}_left`) || "auto" : "auto",
     padding: "10px",
-    backgroundColor: "rgba(255, 255, 255, 0.1)", // Супер прозрачный фон
-    color: "rgba(0, 0, 0, 0.8)", // Текст чуть прозрачный, но читаемый
+    backgroundColor: "rgba(255, 255, 255, 0.02)", // Супер прозрачный фон
+    color: "rgba(0, 0, 0, 0.08)", // Текст чуть прозрачный, но читаемый
     fontWeight: "bold",
     borderRadius: "6px",
     zIndex: 10000,
-    border: "1px solid rgba(0, 0, 0, 0.1)",
-    boxShadow: "0 2px 4px rgba(0, 0, 0, 0.1)",
+    border: "1px solid rgba(0, 0, 0, 0.05)",
+    boxShadow: "0 2px 4px rgba(0, 0, 0, 0.05)",
     display: isBoxVisible ? "block" : "none",
     cursor: "move",
     userSelect: "none",
