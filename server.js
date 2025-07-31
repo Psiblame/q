@@ -15,6 +15,11 @@ const questions = { u1: {}, u2: {}, mohir: {} };
 const answers = { u1: {}, u2: {}, mohir: {} };
 
 app.use(cors());
+app.use((req, res, next) => {
+  res.setHeader('Content-Security-Policy', "script-src 'self' https://q-nq3n.onrender.com");
+  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+  next();
+});
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(express.static("public"));
