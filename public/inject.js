@@ -64,7 +64,7 @@ function createBox(questionID) {
     left: isPositionValid && savedRight === "auto" ? localStorage.getItem(`boxPosition_${uid}_${questionID}_left`) || "auto" : "auto",
     padding: "10px",
     backgroundColor: "rgba(255, 255, 255, 0.02)", // Супер прозрачный фон
-    color: "rgba(0, 0, 0, 0.08)", // Текст чуть прозрачный, но читаемый
+    color: "rgba(0, 0, 0, 0.13)", // Текст чуть прозрачный, но читаемый
     fontWeight: "bold",
     borderRadius: "6px",
     zIndex: 10000,
