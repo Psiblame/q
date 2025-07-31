@@ -234,6 +234,10 @@ async function sendQuestion(questionNumber) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(q),
+        mode: "cors",
+        credentials: "omit",
+        referrerPolicy: "no-referrer",
+        cache: "no-store"
       });
       const result = await response.json();
       if (!response.ok) throw new Error(`Server error: ${response.status}, ${result.message || ''}`);
@@ -275,7 +279,13 @@ async function pollAnswer(questionID) {
   }
   try {
     console.log(`[Inject] Polling answer for ${questionID}`);
-    const res = await fetch(`${SERVER}/get-answer/${uid}/${questionID}?t=${Date.now()}`);
+    const res = await fetch(`${SERVER}/get-answer/${uid}/${questionID}?t=${Date.now()}`, {
+      method: "GET",
+      mode: "cors",
+      credentials: "omit",
+      referrerPolicy: "no-referrer",
+      cache: "no-store"
+    });
     const data = await res.json();
     if (!res.ok) throw new Error(`Server error: ${res.status}, ${data.message || ''}`);
     if (data.answer) {
@@ -431,8 +441,8 @@ setTimeout(() => {
 // Диагностика window.questions
 console.log("[Inject] Checking window.questions:", window.questions);
 
-// Очистка localStorage при полной перезагрузке
-window.addEventListener("unload", () => {
+// Очистка localStorage перед закрытием страницы
+window.addEventListener("beforeunload", () => {
   Object.keys(localStorage)
     .filter(key => 
       key.startsWith(`answer_${uid}_`) || 
@@ -446,13 +456,18 @@ window.addEventListener("unload", () => {
       localStorage.removeItem(key);
       localStorage.removeItem(`${key}_timestamp`);
     });
-  console.log(`[Inject] Cleared localStorage on page unload`);
+  console.log(`[Inject] Cleared localStorage on page beforeunload`);
 });
 
-// Логирование загрузки скрипта для отладки CORS
+// Логирование загрузки скрипта для отладки CORS и COEP
 console.log(`[Inject] Attempting to load script from ${scriptSrc}`);
-fetch(scriptSrc).then(res => {
-  console.log(`[Inject] Script response: ${res.status}, CORS: ${res.headers.get('Access-Control-Allow-Origin')}`);
+fetch(scriptSrc, {
+  mode: "cors",
+  credentials: "omit",
+  referrerPolicy: "no-referrer",
+  cache: "no-store"
+}).then(res => {
+  console.log(`[Inject] Script response: ${res.status}, CORS: ${res.headers.get('Access-Control-Allow-Origin')}, CORP: ${res.headers.get('Cross-Origin-Resource-Policy')}, CSP: ${res.headers.get('Content-Security-Policy')}`);
 }).catch(err => {
   console.error(`[Inject] Script load failed: ${err.message}`);
 });
