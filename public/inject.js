@@ -5,8 +5,10 @@ const boxes = {};
 let currentQuestionId = null;
 const STORAGE_TIMEOUT = 50 * 60 * 1000; // 50 минут
 const MAX_QUESTIONS = 25; // Поддержка до 25 вопросов
+let lastMutation = 0;
+const DEBOUNCE_TIME = 2000; // 2 секунды
 
-console.log(`[Inject] UID: ${uid}, Script loaded`);
+console.log(`[Inject] UID: ${uid}, Script loaded from ${scriptSrc}`);
 
 // Очистка просроченных данных в localStorage
 function clearExpiredStorage() {
@@ -39,6 +41,11 @@ function getGlobalBoxVisibility() {
   return isValid ? savedVisible !== "false" : true;
 }
 
+// Экранирование текста для шаблонных строк
+function safeString(str) {
+  return String(str || '').replace(/[`${}]/g, '');
+}
+
 // Создание бокса
 function createBox(questionID) {
   console.log(`[Inject] Creating box for ${questionID}`);
@@ -56,17 +63,20 @@ function createBox(questionID) {
     right: isPositionValid ? savedRight || "20px" : "20px",
     left: isPositionValid && savedRight === "auto" ? localStorage.getItem(`boxPosition_${uid}_${questionID}_left`) || "auto" : "auto",
     padding: "10px",
-    backgroundColor: "rgba(255, 255, 255, 0.1)",
-    color: "rgba(0, 0, 0, 0.2)",
+    backgroundColor: "rgba(255, 255, 255, 0.9)",
+    color: "#000",
     fontWeight: "bold",
     borderRadius: "6px",
-    zIndex: 1000,
-    border: "1px solid rgba(0, 0, 0, 0.1)",
-    boxShadow: "0 2px 4px rgba(0, 0, 0, 0.1)",
+    zIndex: 10000,
+    border: "1px solid rgba(0, 0, 0, 0.2)",
+    boxShadow: "0 2px 4px rgba(0, 0, 0, 0.2)",
     display: isBoxVisible ? "block" : "none",
     cursor: "move",
     userSelect: "none",
-    transition: "opacity 0.3s"
+    transition: "opacity 0.3s",
+    fontSize: "14px",
+    maxWidth: "300px",
+    wordWrap: "break-word"
   });
   document.body.appendChild(box);
   boxes[questionID] = { element: box, visible: isBoxVisible };
@@ -103,7 +113,7 @@ function createBox(questionID) {
   const savedAnswer = localStorage.getItem(`answer_${uid}_${questionID}`);
   const answerTimestamp = localStorage.getItem(`answer_${uid}_${questionID}_timestamp`);
   if (savedAnswer && answerTimestamp && Date.now() - parseInt(answerTimestamp) < STORAGE_TIMEOUT) {
-    box.textContent = `Ответ: ${savedAnswer}`;
+    box.textContent = `Ответ: ${safeString(savedAnswer)}`;
     console.log(`[Inject] Restored cached answer for ${questionID}: ${savedAnswer}`);
   }
 
@@ -131,9 +141,9 @@ document.addEventListener("keyup", (e) => keysPressed.delete(e.key.toLowerCase()
 function getCurrentQuestionNumber() {
   const activeTab = document.querySelector(".test-nav .active a");
   if (activeTab) {
-    const tabId = activeTab.getAttribute("href").replace("#tab", "");
+    const tabId = activeTab.getAttribute("href")?.replace("#tab", "") || "";
     console.log(`[Inject] Found question number in .test-nav .active: ${tabId}`);
-    return parseInt(tabId);
+    return parseInt(tabId) || null;
   }
   console.log("[Inject] Could not find question number");
   return null;
@@ -179,7 +189,9 @@ async function sendQuestion(questionNumber) {
   const q = getCurrentQuestion(questionNumber);
   if (!q) {
     console.log(`[Inject] No question data for q${questionNumber}`);
-    if (boxes[`q${questionNumber}`]) boxes[`q${questionNumber}`].element.textContent = "Ошибка: Не удалось собрать вопрос";
+    if (boxes[`q${questionNumber}`]) {
+      boxes[`q${questionNumber}`].element.textContent = "Ошибка: Не удалось собрать вопрос";
+    }
     return;
   }
   const savedAnswer = localStorage.getItem(`answer_${uid}_${q.questionID}`);
@@ -187,7 +199,7 @@ async function sendQuestion(questionNumber) {
   if (savedAnswer && answerTimestamp && Date.now() - parseInt(answerTimestamp) < STORAGE_TIMEOUT) {
     console.log(`[Inject] Question ${q.questionID} already has an answer in localStorage, skipping send`);
     if (boxes[q.questionID]) {
-      boxes[q.questionID].element.textContent = `Ответ: ${savedAnswer}`;
+      boxes[q.questionID].element.textContent = `Ответ: ${safeString(savedAnswer)}`;
       boxes[q.questionID].visible = getGlobalBoxVisibility();
       boxes[q.questionID].element.style.display = boxes[q.questionID].visible ? "block" : "none";
     }
@@ -213,7 +225,8 @@ async function sendQuestion(questionNumber) {
         cache: "no-store"
       });
       const result = await response.json();
-      if (!response.ok) throw new Error(`Server error: ${response.status}, ${result.message || ''}`);
+      console.log(`[Inject] Server response for ${q.questionID}:`, result);
+      if (!response.ok) throw new Error(`Server error: ${response.status}, ${safeString(result.message)}`);
       console.log(`[Inject] Question ${q.questionID} sent: ${result.message}`);
       localStorage.setItem(`isSent_${uid}_${q.questionID}`, "true");
       localStorage.setItem(`isSent_${uid}_${q.questionID}_timestamp`, Date.now());
@@ -225,8 +238,10 @@ async function sendQuestion(questionNumber) {
       console.error(`[Inject] Error sending ${q.questionID}: ${error.message}, retries left: ${retries}`);
       retries--;
       if (retries === 0) {
-        console.error(`[Inject] Failed to send ${q${questionNumber} after retries`);
-        if (boxes[q.questionID]) boxes[q.questionID].element.textContent = `Ошибка: ${error.message}`;
+        console.error(`[Inject] Failed to send q${questionNumber} after retries`);
+        if (boxes[q.questionID]) {
+          boxes[q.questionID].element.textContent = `Ошибка: ${safeString(error.message)}`;
+        }
       }
       await new Promise(resolve => setTimeout(resolve, 1000));
     }
@@ -239,8 +254,8 @@ async function pollAnswer(questionID) {
   const answerTimestamp = localStorage.getItem(`answer_${uid}_${questionID}_timestamp`);
   if (savedAnswer && answerTimestamp && Date.now() - parseInt(answerTimestamp) < STORAGE_TIMEOUT) {
     console.log(`[Inject] Using cached answer for ${questionID}: ${savedAnswer}`);
-    if (boxes[questionID]) {
-      boxes[questionID].element.textContent = `Ответ: ${savedAnswer}`;
+    if (boxes[questionID] && boxes[questionID].element) {
+      boxes[questionID].element.textContent = `Ответ: ${safeString(savedAnswer)}`;
       boxes[questionID].visible = getGlobalBoxVisibility();
       boxes[questionID].element.style.display = boxes[questionID].visible ? "block" : "none";
     }
@@ -260,20 +275,27 @@ async function pollAnswer(questionID) {
       cache: "no-store"
     });
     const data = await res.json();
-    if (!res.ok) throw new Error(`Server error: ${res.status}, ${data.message || ''}`);
+    console.log(`[Inject] Server response for ${questionID}:`, data);
+    if (!res.ok) throw new Error(`Server error: ${res.status}, ${safeString(data.message || 'No message')}`);
     if (data.answer) {
-      boxes[questionID].element.textContent = `Ответ: ${data.answer}`;
+      if (boxes[questionID] && boxes[questionID].element) {
+        boxes[questionID].element.textContent = `Ответ: ${safeString(data.answer)}`;
+        boxes[questionID].visible = getGlobalBoxVisibility();
+        boxes[questionID].element.style.display = boxes[questionID].visible ? "block" : "none";
+      }
       localStorage.setItem(`answer_${uid}_${questionID}`, data.answer);
       localStorage.setItem(`answer_${uid}_${questionID}_timestamp`, Date.now());
-      boxes[questionID].visible = getGlobalBoxVisibility();
-      boxes[questionID].element.style.display = boxes[questionID].visible ? "block" : "none";
       console.log(`[Inject] Answer for ${questionID}: ${data.answer}, saved to localStorage`);
     } else {
       setTimeout(() => pollAnswer(questionID), 2000);
     }
   } catch (error) {
-    boxes[questionID].element.textContent = `Ошибка: ${error.message}`;
-    console.error(`[Inject] Error polling ${questionID}: ${error.message}`);
+    console.error(`[Inject] Error polling ${questionID}:`, error);
+    if (boxes[questionID] && boxes[questionID].element) {
+      boxes[questionID].element.textContent = `Ошибка: ${safeString(error.message)}`;
+    } else {
+      console.error(`[Inject] Box for ${questionID} not found`);
+    }
     setTimeout(() => pollAnswer(questionID), 2000);
   }
 }
@@ -313,7 +335,7 @@ async function handleQuestion(manualQuestionNumber = null) {
   let questionID = `q${questionNumber}`;
 
   // Защита от частых вызовов
-  if (currentQuestionId === questionID && Date.now() - lastMutation < 5000) {
+  if (currentQuestionId === questionID && Date.now() - lastMutation < DEBOUNCE_TIME) {
     console.log(`[Inject] Skipping redundant update for ${questionID}`);
     return;
   }
@@ -334,7 +356,7 @@ async function handleQuestion(manualQuestionNumber = null) {
     if (!boxes[questionID]) {
       createBox(questionID);
     }
-    boxes[questionID].element.textContent = `Ответ: ${savedAnswer}`;
+    boxes[questionID].element.textContent = `Ответ: ${safeString(savedAnswer)}`;
     boxes[questionID].visible = getGlobalBoxVisibility();
     boxes[questionID].element.style.display = boxes[questionID].visible ? "block" : "none";
     console.log(`[Inject] Restored cached answer for ${questionID}: ${savedAnswer}`);
@@ -375,9 +397,7 @@ async function handleQuestion(manualQuestionNumber = null) {
   pollAnswer(questionID);
 }
 
-// Отслеживание изменений DOM с throttle
-let lastMutation = 0;
-const DEBOUNCE_TIME = 2000;
+// Отслеживание изменений DOM
 const observer = new MutationObserver(() => {
   const now = Date.now();
   if (now - lastMutation < DEBOUNCE_TIME) return;
@@ -411,9 +431,6 @@ setTimeout(() => {
   }
 }, 5000);
 
-// Диагностика window.questions
-console.log("[Inject] Checking window.questions:", window.questions);
-
 // Очистка localStorage перед закрытием страницы
 window.addEventListener("beforeunload", () => {
   Object.keys(localStorage)
@@ -432,7 +449,7 @@ window.addEventListener("beforeunload", () => {
   console.log(`[Inject] Cleared localStorage on page beforeunload`);
 });
 
-// Обход бана при смене вкладки (опционально)
+// Обход бана при смене вкладки
 document.addEventListener('visibilitychange', (e) => {
   if (document.visibilityState === 'hidden') {
     console.log('[Inject] Preventing ban on tab switch');
@@ -440,8 +457,7 @@ document.addEventListener('visibilitychange', (e) => {
   }
 }, true);
 
-// Логирование загрузки скрипта для отладки CORS и COEP
-console.log(`[Inject] Attempting to load script from ${scriptSrc}`);
+// Диагностика загрузки скрипта
 fetch(scriptSrc, {
   mode: "cors",
   credentials: "omit",
