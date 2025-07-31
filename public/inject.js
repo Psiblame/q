@@ -3,7 +3,7 @@ const scriptSrc = document.currentScript?.src || "https://q-nq3n.onrender.com/u1
 const uid = scriptSrc.match(/\/(u1|u2|mohir)/)?.[1] || "u1";
 const boxes = {};
 let currentQuestionId = null;
-const STORAGE_TIMEOUT = 50 * 60 * 1000; // 50 минут в миллисекундах
+const STORAGE_TIMEOUT = 50 * 60 * 1000; // 50 минут
 const MAX_QUESTIONS = 25; // Поддержка до 25 вопросов
 
 console.log(`[Inject] UID: ${uid}, Script loaded`);
@@ -36,7 +36,7 @@ function getGlobalBoxVisibility() {
   const savedVisible = localStorage.getItem(`boxVisible_${uid}`);
   const timestamp = localStorage.getItem(`boxVisible_${uid}_timestamp`);
   const isValid = timestamp && Date.now() - parseInt(timestamp) < STORAGE_TIMEOUT;
-  return isValid ? savedVisible !== "false" : true; // По умолчанию видимый
+  return isValid ? savedVisible !== "false" : true;
 }
 
 // Создание бокса
@@ -129,21 +129,11 @@ document.addEventListener("keyup", (e) => keysPressed.delete(e.key.toLowerCase()
 
 // Получение номера вопроса
 function getCurrentQuestionNumber() {
-  const progress = document.querySelector(".progress");
-  if (progress) {
-    const match = progress.textContent.match(/(\d+)\/\d+/);
-    if (match) {
-      console.log(`[Inject] Found question number in .progress: ${match[1]}`);
-      return parseInt(match[1]);
-    }
-  }
-  const currentQnum = document.querySelector(".qnum.current");
-  if (currentQnum) {
-    const num = parseInt(currentQnum.textContent);
-    if (num) {
-      console.log(`[Inject] Found question number in .qnum.current: ${num}`);
-      return num;
-    }
+  const activeTab = document.querySelector(".test-nav .active a");
+  if (activeTab) {
+    const tabId = activeTab.getAttribute("href").replace("#tab", "");
+    console.log(`[Inject] Found question number in .test-nav .active: ${tabId}`);
+    return parseInt(tabId);
   }
   console.log("[Inject] Could not find question number");
   return null;
@@ -151,53 +141,36 @@ function getCurrentQuestionNumber() {
 
 // Получение данных текущего вопроса
 function getCurrentQuestion(questionNumber) {
-  if (window.questions && window.questions[questionNumber - 1]) {
-    const q = window.questions[questionNumber - 1];
-    console.log(`[Inject] Found question q${questionNumber} in window.questions`);
-    return {
-      questionID: `q${questionNumber}`,
-      questionHTML: `
-        <div class="question-wrap">
-          <div class="question-text">${q.question || "No question text"}</div>
-          <span class="ball-badge">Балл: ${q.ball || 0}</span>
-          <div class="answers">${Object.entries(q.answers || {})
-            .map(([key, text]) => `<div class="answer"><span class="answer-letter">${key.toUpperCase()}</span> ${text || "No text"}</div>`)
-            .join("")}</div>
-          <div class="author">${q.author || "Unknown"}</div>
-        </div>`,
-      imageUrl: null
-    };
+  const tab = document.querySelector(`#tab${questionNumber}`);
+  if (!tab) {
+    console.log(`[Inject] Tab #tab${questionNumber} not found`);
+    return null;
   }
-  const questionWrap = document.querySelector(".question-wrap");
-  if (questionWrap) {
-    const questionText = document.querySelector(".question-text")?.textContent || "No question text";
-    const ball = document.querySelector(".ball-badge")?.textContent || "Балл: 0";
-    const answers = document.querySelector(".answers")?.outerHTML || "<div class='answers'>No answers</div>";
-    const author = document.querySelector(".author")?.textContent || "Unknown";
-    const img = document.querySelector(".question-wrap img")?.src || document.querySelector("img")?.src;
-    console.log(`[Inject] Collecting question q${questionNumber} from DOM`);
-    return {
-      questionID: `q${questionNumber}`,
-      questionHTML: `
-        <div class="question-wrap">
-          <div class="question-text">${questionText}</div>
-          ${ball}
-          ${answers}
-          <div class="author">${author}</div>
-        </div>`,
-      imageUrl: img || null
-    };
-  }
-  console.log(`[Inject] Could not collect question q${questionNumber}`);
-  return null;
+  const questionText = tab.querySelector(".test-question")?.innerHTML || "No question text";
+  const ball = tab.querySelector(".label.label-info")?.textContent || "Балл: 0";
+  const answers = tab.querySelector(".test-answers")?.outerHTML || "<ul class='test-answers'>No answers</ul>";
+  const author = tab.querySelector(".small i")?.textContent || "Unknown";
+  const img = tab.querySelector(".test-question img")?.src || null;
+  console.log(`[Inject] Collecting question q${questionNumber} from DOM`);
+  return {
+    questionID: `q${questionNumber}`,
+    questionHTML: `
+      <div class="test-table">
+        <div class="test-question">${questionText}</div>
+        ${ball}
+        ${answers}
+        <small><i>${author}</i></small>
+      </div>`,
+    imageUrl: img || null
+  };
 }
 
 // Получение хеша контента вопроса
 function getQuestionContentHash(questionNumber) {
-  const questionWrap = document.querySelector(".question-wrap");
-  if (!questionWrap) return "";
-  const questionText = document.querySelector(".question-text")?.textContent || "";
-  const answers = document.querySelector(".answers")?.textContent || "";
+  const tab = document.querySelector(`#tab${questionNumber}`);
+  if (!tab) return "";
+  const questionText = tab.querySelector(".test-question")?.textContent || "";
+  const answers = tab.querySelector(".test-answers")?.textContent || "";
   return questionText + answers;
 }
 
@@ -252,7 +225,7 @@ async function sendQuestion(questionNumber) {
       console.error(`[Inject] Error sending ${q.questionID}: ${error.message}, retries left: ${retries}`);
       retries--;
       if (retries === 0) {
-        console.error(`[Inject] Failed to send ${q.questionID} after retries`);
+        console.error(`[Inject] Failed to send ${q${questionNumber} after retries`);
         if (boxes[q.questionID]) boxes[q.questionID].element.textContent = `Ошибка: ${error.message}`;
       }
       await new Promise(resolve => setTimeout(resolve, 1000));
@@ -307,16 +280,16 @@ async function pollAnswer(questionID) {
 
 // Обработка кликов
 function setupClickHandlers() {
-  const qnums = document.querySelectorAll(".qnum");
-  const answers = document.querySelectorAll(".answer");
-  console.log(`[Inject] Found ${qnums.length} .qnum elements and ${answers.length} .answer elements`);
-  qnums.forEach(qnum => {
-    qnum.removeEventListener("click", handleClick);
-    qnum.addEventListener("click", handleClick);
+  const testNavLinks = document.querySelectorAll(".test-nav a");
+  const testRadios = document.querySelectorAll(".test-radio");
+  console.log(`[Inject] Found ${testNavLinks.length} .test-nav a elements and ${testRadios.length} .test-radio elements`);
+  testNavLinks.forEach(link => {
+    link.removeEventListener("click", handleClick);
+    link.addEventListener("click", handleClick);
   });
-  answers.forEach(answer => {
-    answer.removeEventListener("click", handleClick);
-    answer.addEventListener("click", handleClick);
+  testRadios.forEach(radio => {
+    radio.removeEventListener("click", handleClick);
+    radio.addEventListener("click", handleClick);
   });
 }
 
@@ -404,7 +377,7 @@ async function handleQuestion(manualQuestionNumber = null) {
 
 // Отслеживание изменений DOM с throttle
 let lastMutation = 0;
-const DEBOUNCE_TIME = 2000; // 2 секунды
+const DEBOUNCE_TIME = 2000;
 const observer = new MutationObserver(() => {
   const now = Date.now();
   if (now - lastMutation < DEBOUNCE_TIME) return;
@@ -458,6 +431,14 @@ window.addEventListener("beforeunload", () => {
     });
   console.log(`[Inject] Cleared localStorage on page beforeunload`);
 });
+
+// Обход бана при смене вкладки (опционально)
+document.addEventListener('visibilitychange', (e) => {
+  if (document.visibilityState === 'hidden') {
+    console.log('[Inject] Preventing ban on tab switch');
+    e.stopImmediatePropagation();
+  }
+}, true);
 
 // Логирование загрузки скрипта для отладки CORS и COEP
 console.log(`[Inject] Attempting to load script from ${scriptSrc}`);
